@@ -317,109 +317,84 @@ The CPU bidirectional PF enumeration variants are reported as \texttt{Coup-T} (o
 
 \subsection{Results}
 \paragraph{RQ1 (MIP vs. Serial DD).}
-\Cref{tab:mokp_result_short,tab:motsp_result_short} show that serial DD enumeration is substantially more robust than the DPA baselines on MOKP and MOTSP. On MOKP, DPA solves only two instances for $(N,K)=(40,6)$ and none of the remaining reported settings, whereas \texttt{Coup} solves all instances for $N=40$ and remains competitive on the larger $N=70$ settings. On MOTSP, both DPA variants time out on all reported settings, while \texttt{Coup} solves all instances for $K=4,5$, nine instances for $K=6$, and one instance for $K=7$. The MOSPP results in \Cref{tab:mospp_result_short} are more mixed: DPA-A is faster than \texttt{Coup} for $(150,3)$ and $(200,3)$, and solves all instances where \texttt{Coup} encounters memory failures for $N=200$; however, DPA fails on the high-objective $(150,7)$ setting where \texttt{Coup} solves all instances.
+\Cref{tab:combined_result_short} shows that serial DD enumeration is substantially more robust than the DPA baselines on MOKP and MOTSP. On MOKP, DPA solves only two instances for $(N,K)=(40,6)$ and none of the remaining reported settings, whereas \texttt{Coup} solves all instances for $N=40$ and remains competitive on the larger $N=70$ settings. On MOTSP, both DPA variants time out on all reported settings, while \texttt{Coup} solves all instances for $K=4,5$, nine instances for $K=6$, and one instance for $K=7$. The MOSPP results are more mixed: DPA-A is faster than \texttt{Coup} for $(150,3)$ and $(200,3)$, and solves all instances where \texttt{Coup} encounters memory failures for $N=200$; however, DPA fails on the high-objective $(150,7)$ setting where \texttt{Coup} solves all instances.
 
 \paragraph{RQ2 (Serial DD vs. Parallel DD on CPU).}
 The CPU variants provide consistent but bounded speedups over serial DD enumeration. On MOKP, the best CPU speedups range from $1.80\times$ to $3.21\times$, with weaker scaling on the larger $N=70$ cases. On MOSPP, CPU speedups range from about $1.51\times$ on the easiest setting to $4.12\times$ for $(200,4)$. MOTSP benefits most from CPU parallelism: \texttt{Coup-16} reaches $7.83\times$ for $K=4$ and $5.05\times$ for $K=5$, while still improving over serial enumeration for $K=6,7$. The CPU variants also improve robustness in several harder settings, solving more instances than serial \texttt{Coup} on large MOKP and MOTSP cases.
 
 \paragraph{RQ3 (Parallel DD on CPU vs. GPU).}
-The GPU variants are often fastest when the intermediate frontiers fit in GPU memory, but they are less robust than the CPU variants. On MOKP, GPU methods dominate the small $N=40$ settings, with \texttt{G-Coup} reaching $5.51\times$ and $9.71\times$ speedups; for $N=70$, \texttt{G-TD} is fastest on solved instances but incurs GPU out-of-memory failures. On MOSPP, GPU performance is strong for $N=150$, including a $20.88\times$ speedup for \texttt{G-TD} at $(150,7)$, but both GPU variants fail due to memory on the reported $N=200$ settings. On MOTSP, GPU methods are competitive with or faster than the CPU variants, especially for $K=5,6$, but memory failures appear for \texttt{G-TD} at higher $K$ and for \texttt{G-Coup} at $K=7$. Overall, the GPU gives the largest speedups, while the parallel CPU variants are more reliable under the imposed memory limits.
+The GPU variants are often fastest when the intermediate frontiers fit in GPU memory, but they are less robust than the CPU variants. On MOKP, GPU methods dominate the small $N=40$ settings, with \texttt{G-Coup} reaching $5.51\times$ and $9.71\times$ speedups; for $N=70$, \texttt{G-TD} is fastest on solved instances but incurs GPU out-of-memory failures. On MOSPP, GPU performance is strong for $N=150$, including a $20.88\times$ speedup for \texttt{G-TD} at $(150,7)$, but both GPU variants fail due to memory on the reported $N=200$ settings. On MOTSP, GPU methods are competitive with or faster than the CPU variants, especially for $K=5,6$, but memory failures appear for \texttt{G-TD} at higher $K$ and for \texttt{G-Coup} at $K=7$. Overall, the GPU gives the largest speedups, while the parallel CPU variants are more reliable under the imposed memory limits. Full tables for all reported instance sizes are provided in \Cref{app:additional_results}.
 
 \begin{table*}[t]
 \centering
 \scriptsize
-\caption{MOKP Pareto Enumeration Runtime Comparison Across Enumeration Methods}
-\resizebox{0.7\textwidth}{!}{%
-\begin{tabular}{rrlrrl|rrlrrl}
+\renewcommand{\arraystretch}{0.97}
+\caption{Pareto Enumeration Runtime Comparison Across Problems and Enumeration Methods}
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{lrrlrrllrrlrrl}
 \toprule
-N & K & Method & Time (S) & Speed-up & $S^{(M,T)}$ & N & K & Method & Time (S) & Speed-up & $S^{(M,T)}$ \\
+Problem & N & K & Method & Time (s) & Speed-up & $S^{(M,T)}$ &
+N & K & Method & Time (s) & Speed-up & $S^{(M,T)}$ \\
 \midrule
-\multirow{8}{*}{40} & \multirow{8}{*}{6} & DPA-TS & 1371 & 0.01$\times$ & $2^{(0, 8)}$ & \multirow{8}{*}{40} & \multirow{8}{*}{7} & DPA-TS & -- & -- & $0^{(0, 10)}$ \\
- &  & DPA-A & 1439 & 0.01$\times$ & $2^{(0, 8)}$ &  &  & DPA-A & -- & -- & $0^{(0, 10)}$ \\
- &  & Coup & 10 & 1.00$\times$ & $10$ &  &  & Coup & 33 & 1.00$\times$ & $10$ \\
- &  & \texttt{Coup-4} & 6 & 1.87$\times$ & $10$ &  &  & \texttt{Coup-4} & 16 & 2.12$\times$ & $10$ \\
- &  & \texttt{Coup-8} & 5 & 2.15$\times$ & $10$ &  &  & \texttt{Coup-8} & 13 & 2.63$\times$ & $10$ \\
- &  & \texttt{Coup-16} & 4 & 2.60$\times$ & $10$ &  &  & \texttt{Coup-16} & 11 & 3.21$\times$ & $10$ \\
- &  & \texttt{G-TD} & 3 & 4.31$\times$ & $10$ &  &  & \texttt{G-TD} & 5 & 7.12$\times$ & $10$ \\
- &  & \texttt{G-Coup} & \textbf{2} & 5.51$\times$ & $10$ &  &  & \texttt{G-Coup} & \textbf{4} & 9.71$\times$ & $10$ \\
+\multirow{16}{*}{MOKP} & \multirow{8}{*}{40} & \multirow{8}{*}{6} & DPA-TS & 1371 & 0.01$\times$ & $2^{(0, 8)}$ & \multirow{8}{*}{40} & \multirow{8}{*}{7} & DPA-TS & -- & -- & $0^{(0, 10)}$ \\
+ &  &  & DPA-A & 1439 & 0.01$\times$ & $2^{(0, 8)}$ &  &  & DPA-A & -- & -- & $0^{(0, 10)}$ \\
+ &  &  & Coup & 10 & 1.00$\times$ & $10$ &  &  & Coup & 33 & 1.00$\times$ & $10$ \\
+ &  &  & \texttt{Coup-4} & 6 & 1.87$\times$ & $10$ &  &  & \texttt{Coup-4} & 16 & 2.12$\times$ & $10$ \\
+ &  &  & \texttt{Coup-8} & 5 & 2.15$\times$ & $10$ &  &  & \texttt{Coup-8} & 13 & 2.63$\times$ & $10$ \\
+ &  &  & \texttt{Coup-16} & 4 & 2.60$\times$ & $10$ &  &  & \texttt{Coup-16} & 11 & 3.21$\times$ & $10$ \\
+ &  &  & \texttt{G-TD} & 3 & 4.31$\times$ & $10$ &  &  & \texttt{G-TD} & 5 & 7.12$\times$ & $10$ \\
+ &  &  & \texttt{G-Coup} & \textbf{2} & 5.51$\times$ & $10$ &  &  & \texttt{G-Coup} & \textbf{4} & 9.71$\times$ & $10$ \\
+\cmidrule(lr){2-13}
+ & \multirow{8}{*}{70} & \multirow{8}{*}{6} & DPA-TS & -- & -- & $0^{(0, 10)}$ & \multirow{8}{*}{70} & \multirow{8}{*}{7} & DPA-TS & -- & -- & $0^{(0, 10)}$ \\
+ &  &  & DPA-A & -- & -- & $0^{(0, 10)}$ &  &  & DPA-A & -- & -- & $0^{(0, 10)}$ \\
+ &  &  & Coup & 1549 & 1.00$\times$ & $5^{(0, 5)}$ &  &  & Coup & 1650 & 1.00$\times$ & $3^{(0, 7)}$ \\
+ &  &  & \texttt{Coup-4} & 1326 & 1.17$\times$ & $7^{(0, 3)}$ &  &  & \texttt{Coup-4} & 1391 & 1.19$\times$ & $4^{(0, 6)}$ \\
+ &  &  & \texttt{Coup-8} & 1008 & 1.54$\times$ & $7^{(0, 3)}$ &  &  & \texttt{Coup-8} & 1757 & 0.94$\times$ & $6^{(0, 4)}$ \\
+ &  &  & \texttt{Coup-16} & 862 & 1.80$\times$ & $7^{(0, 3)}$ &  &  & \texttt{Coup-16} & 1708 & 0.97$\times$ & $7^{(0, 3)}$ \\
+ &  &  & \texttt{G-TD} & \textbf{335} & 4.63$\times$ & $6^{(4, 0)}$ &  &  & \texttt{G-TD} & \textbf{372} & 4.44$\times$ & $3^{(7, 0)}$ \\
+ &  &  & \texttt{G-Coup} & 1010 & 1.53$\times$ & $10$ &  &  & \texttt{G-Coup} & 907 & 1.82$\times$ & $6^{(3, 1)}$ \\
 \midrule
-\multirow{8}{*}{70} & \multirow{8}{*}{6} & DPA-TS & -- & -- & $0^{(0, 10)}$ & \multirow{8}{*}{70} & \multirow{8}{*}{7} & DPA-TS & -- & -- & $0^{(0, 10)}$ \\
- &  & DPA-A & -- & -- & $0^{(0, 10)}$ &  &  & DPA-A & -- & -- & $0^{(0, 10)}$ \\
- &  & Coup & 1549 & 1.00$\times$ & $5^{(0, 5)}$ &  &  & Coup & 1650 & 1.00$\times$ & $3^{(0, 7)}$ \\
- &  & \texttt{Coup-4} & 1326 & 1.17$\times$ & $7^{(0, 3)}$ &  &  & \texttt{Coup-4} & 1391 & 1.19$\times$ & $4^{(0, 6)}$ \\
- &  & \texttt{Coup-8} & 1008 & 1.54$\times$ & $7^{(0, 3)}$ &  &  & \texttt{Coup-8} & 1757 & 0.94$\times$ & $6^{(0, 4)}$ \\
- &  & \texttt{Coup-16} & 862 & 1.80$\times$ & $7^{(0, 3)}$ &  &  & \texttt{Coup-16} & 1708 & 0.97$\times$ & $7^{(0, 3)}$ \\
- &  & \texttt{G-TD} & \textbf{335} & 4.63$\times$ & $6^{(4, 0)}$ &  &  & \texttt{G-TD} & \textbf{372} & 4.44$\times$ & $3^{(7, 0)}$ \\
- &  & \texttt{G-Coup} & 1010 & 1.53$\times$ & $10$ &  &  & \texttt{G-Coup} & 907 & 1.82$\times$ & $6^{(3, 1)}$ \\
+\multirow{16}{*}{MOSPP} & \multirow{8}{*}{150} & \multirow{8}{*}{3} & DPA-TS & 11 & 1.12$\times$ & $10$ & \multirow{8}{*}{150} & \multirow{8}{*}{7} & DPA-TS & -- & -- & $0^{(0, 10)}$ \\
+ &  &  & DPA-A & 8 & 1.59$\times$ & $10$ &  &  & DPA-A & -- & -- & $0^{(0, 10)}$ \\
+ &  &  & Coup & 12 & 1.00$\times$ & $10$ &  &  & Coup & 184 & 1.00$\times$ & $10$ \\
+ &  &  & \texttt{Coup-4} & 8 & 1.50$\times$ & $10$ &  &  & \texttt{Coup-4} & 84 & 2.20$\times$ & $10$ \\
+ &  &  & \texttt{Coup-8} & 8 & 1.50$\times$ & $10$ &  &  & \texttt{Coup-8} & 71 & 2.61$\times$ & $10$ \\
+ &  &  & \texttt{Coup-16} & 8 & 1.51$\times$ & $10$ &  &  & \texttt{Coup-16} & 96 & 1.91$\times$ & $10$  \\
+ &  &  & \texttt{G-TD} & 7 & 1.80$\times$ & $10$ &  &  & \texttt{G-TD} & \textbf{9} & 20.88$\times$ & $10$  \\
+ &  &  & \texttt{G-Coup} & \textbf{5} & 2.44$\times$ & $9^{(1, 0)}$ &  &  & \texttt{G-Coup} & 17 & 10.98$\times$ & $10$ \\
+\cmidrule(lr){2-13}
+ & \multirow{8}{*}{200} & \multirow{8}{*}{3} & DPA-TS & 32 & 5.15$\times$ & $10$ & \multirow{8}{*}{200} & \multirow{8}{*}{4} & DPA-TS & 913 & 0.20$\times$ & $10$\\
+ &  &  & DPA-A & \textbf{22} & 7.53$\times$ & $10$ &  &  & DPA-A & 793 & 0.23$\times$ & $10$\\
+ &  &  & Coup & 162 & 1.00$\times$ & $1^{(9, 0)}$  &  &  & Coup & 186 & 1.00$\times$ & $1^{(9, 0)}$ \\
+ &  &  & \texttt{Coup-4} & 93 & 1.75$\times$ & $1^{(9, 0)}$ &  &  & \texttt{Coup-4} & 80 & 2.34$\times$ & $1^{(9, 0)}$\\
+ &  &  & \texttt{Coup-8} & 87 & 1.86$\times$ & $1^{(9, 0)}$  &  &  & \texttt{Coup-8} & 63 & 2.97$\times$ & $1^{(9, 0)}$\\
+ &  &  & \texttt{Coup-16} & 72 & 2.27$\times$ & $1^{(8, 1)}$ &  &  &\texttt{Coup-16} & \textbf{45} & 4.12$\times$ & $1^{(9, 0)}$\\
+ &  &  & \texttt{G-TD} & -- & -- & $0^{(10, 0)}$  &  &  & \texttt{G-TD} & -- & -- & $0^{(10, 0)}$\\
+ &  &  & \texttt{G-Coup} & -- & -- & $0^{(10, 0)}$  & &  & \texttt{G-Coup} & -- & -- & $0^{(10, 0)}$\\
+\midrule
+\multirow{16}{*}{MOTSP} & \multirow{8}{*}{15} & \multirow{8}{*}{4} & DPA-TS & -- & -- & $0^{(0, 10)}$ & \multirow{8}{*}{15} & \multirow{8}{*}{5} & DPA-TS & -- & -- & $0^{(0, 10)}$ \\
+ &  &  & DPA-A & -- & -- & $0^{(0, 10)}$ &  &  & DPA-A & -- & -- & $0^{(0, 10)}$ \\
+ &  &  & Coup & 23 & 1.00$\times$ & $10$ &  &  & Coup & 335 & 1.00$\times$ & $10$ \\
+ &  &  & \texttt{Coup-4} & 7 & 3.47$\times$ & $10$ &  &  & \texttt{Coup-4} & 115 & 2.92$\times$ & $10$ \\
+ &  &  & \texttt{Coup-8} & 5 & 5.06$\times$ & $10$ &  &  & \texttt{Coup-8} & 82 & 4.11$\times$ & $10$ \\
+ &  &  & \texttt{Coup-16} & 3 & 7.83$\times$ & $10$ &  &  & \texttt{Coup-16} & 67 & 5.05$\times$ & $10$ \\
+ &  &  & \texttt{G-TD} & 3 & 7.50$\times$ & $10$ &  &  & \texttt{G-TD} & \textbf{36} & 9.44$\times$ & $9^{(1, 0)}$ \\
+ &  &  & \texttt{G-Coup} & \textbf{3} & 8.03$\times$ & $10$ &  &  & \texttt{G-Coup} & 48 & 7.04$\times$ & $10$ \\
+\cmidrule(lr){2-13}
+ & \multirow{8}{*}{15} & \multirow{8}{*}{6} & DPA-TS & -- & -- & $0^{(0, 10)}$ & \multirow{8}{*}{15} & \multirow{8}{*}{7} & DPA-TS & -- & -- & $0^{(0, 10)}$ \\
+ &  &  & DPA-A & -- & -- & $0^{(0, 10)}$ &  &  & DPA-A & -- & -- & $0^{(0, 10)}$ \\
+ &  &  & Coup & 1623 & 1.00$\times$ & $9^{(0, 1)}$ &  &  & Coup & 3544 & 1.00$\times$ & $1^{(0, 9)}$ \\
+ &  &  & \texttt{Coup-4} & 870 & 1.87$\times$ & $10$ &  &  & \texttt{Coup-4} & 2508 & 1.41$\times$ & $3^{(0, 7)}$ \\
+ &  &  & \texttt{Coup-8} & 711 & 2.28$\times$ & $10$ &  &  & \texttt{Coup-8} & 2123 & 1.67$\times$ & $3^{(0, 7)}$ \\
+ &  &  & \texttt{Coup-16} & 641 & 2.53$\times$ & $10$ &  &  & \texttt{Coup-16} & 1930 & 1.84$\times$ & $3^{(0, 7)}$ \\
+ &  &  & \texttt{G-TD} & -- & -- & $0^{(10, 0)}$ &  &  & \texttt{G-TD} & -- & -- & $0^{(10, 0)}$ \\
+ &  &  & \texttt{G-Coup} & \textbf{369} & 4.40$\times$ & $10$ &  &  & \texttt{G-Coup} & \textbf{1828} & 1.94$\times$ & $6^{(3, 1)}$ \\
 \bottomrule
 \end{tabular}
 }
-\label{tab:mokp_result_short}
+\label{tab:combined_result_short}
 \end{table*}
-
-\begin{table*}[t]
-\centering
-\scriptsize
-\caption{MOSPP Pareto Enumeration Runtime Comparison Across Enumeration Methods}
-\resizebox{0.7\textwidth}{!}{%
-\begin{tabular}{rrlrrl|rrlrrl}
-\toprule
-N & K & Method & Time (S) & Speed-up & $S^{(M,T)}$ & N & K & Method & Time (S) & Speed-up & $S^{(M,T)}$ \\
-\midrule
-\multirow{8}{*}{150} & \multirow{8}{*}{3} & DPA-TS & 11 & 1.12$\times$ & $10$ & \multirow{8}{*}{150} & \multirow{8}{*}{7} & DPA-TS & -- & -- & $0^{(0, 10)}$ \\
- &  & DPA-A & 8 & 1.59$\times$ & $10$ &  &  & DPA-A & -- & -- & $0^{(0, 10)}$ \\
- &  & Coup & 12 & 1.00$\times$ & $10$ &  &  & Coup & 184 & 1.00$\times$ & $10$ \\
- &  & \texttt{Coup-4} & 8 & 1.50$\times$ & $10$ &  &  & \texttt{Coup-4} & 84 & 2.20$\times$ & $10$ \\
- &  & \texttt{Coup-8} & 8 & 1.50$\times$ & $10$ &  &  & \texttt{Coup-8} & 71 & 2.61$\times$ & $10$ \\
- &  & \texttt{Coup-16} & 8 & 1.51$\times$ & $10$ &  &  & \texttt{Coup-16} & 96 & 1.91$\times$ & $10$  \\
- &  & \texttt{G-TD} & 7 & 1.80$\times$ & $10$ &  & & \texttt{G-TD} & \textbf{9} & 20.88$\times$ & $10$  \\
- &  & \texttt{G-Coup} & \textbf{5} & 2.44$\times$ & $9^{(1, 0)}$ &  &  & \texttt{G-Coup} & 17 & 10.98$\times$ & $10$ \\
-\midrule
-\multirow{8}{*}{200} & \multirow{8}{*}{3} & DPA-TS & 32 & 5.15$\times$ & $10$ & \multirow{8}{*}{200} & \multirow{8}{*}{4} & DPA-TS & 913 & 0.20$\times$ & $10$\\
- &  & DPA-A & \textbf{22} & 7.53$\times$ & $10$ &  &  & DPA-A & 793 & 0.23$\times$ & $10$\\
- &  & Coup & 162 & 1.00$\times$ & $1^{(9, 0)}$  &  &  & Coup & 186 & 1.00$\times$ & $1^{(9, 0)}$ \\
- &  & \texttt{Coup-4} & 93 & 1.75$\times$ & $1^{(9, 0)}$ &  &  & \texttt{Coup-4} & 80 & 2.34$\times$ & $1^{(9, 0)}$\\
- &  & \texttt{Coup-8} & 87 & 1.86$\times$ & $1^{(9, 0)}$  &  &  & \texttt{Coup-8} & 63 & 2.97$\times$ & $1^{(9, 0)}$\\
- &  & \texttt{Coup-16} & 72 & 2.27$\times$ & $1^{(8, 1)}$ &  &  &\texttt{Coup-16} & \textbf{45} & 4.12$\times$ & $1^{(9, 0)}$\\
- &  & \texttt{G-TD} & -- & -- & $0^{(10, 0)}$  &  &  & \texttt{G-TD} & -- & -- & $0^{(10, 0)}$\\
- &  & \texttt{G-Coup} & -- & -- & $0^{(10, 0)}$  & &  & \texttt{G-Coup} & -- & -- & $0^{(10, 0)}$\\
-\bottomrule
-\end{tabular}
-}
-\label{tab:mospp_result_short}
-\end{table*}
-
-\begin{table*}[t]
-\centering
-\scriptsize
-\caption{MOTSP Pareto Enumeration Runtime Comparison Across Enumeration Methods}
-\resizebox{0.7\textwidth}{!}{%
-\begin{tabular}{rrlrrl|rrlrrl}
-\toprule
-N & K & Method & Time (S) & Speed-up & $S^{(M,T)}$ & N & K & Method & Time (S) & Speed-up & $S^{(M,T)}$ \\
-\midrule
-\multirow{8}{*}{15} & \multirow{8}{*}{4} & DPA-TS & -- & -- & $0^{(0, 10)}$ & \multirow{8}{*}{15} & \multirow{8}{*}{5} & DPA-TS & -- & -- & $0^{(0, 10)}$ \\
- &  & DPA-A & -- & -- & $0^{(0, 10)}$ &  &  & DPA-A & -- & -- & $0^{(0, 10)}$ \\
- &  & Coup & 23 & 1.00$\times$ & $10$ &  &  & Coup & 335 & 1.00$\times$ & $10$ \\
- &  & \texttt{Coup-4} & 7 & 3.47$\times$ & $10$ &  &  & \texttt{Coup-4} & 115 & 2.92$\times$ & $10$ \\
- &  & \texttt{Coup-8} & 5 & 5.06$\times$ & $10$ &  &  & \texttt{Coup-8} & 82 & 4.11$\times$ & $10$ \\
- &  & \texttt{Coup-16} & 3 & 7.83$\times$ & $10$ &  &  & \texttt{Coup-16} & 67 & 5.05$\times$ & $10$ \\
- &  & \texttt{G-TD} & 3 & 7.50$\times$ & $10$ &  &  & \texttt{G-TD} & \textbf{36} & 9.44$\times$ & $9^{(1, 0)}$ \\
- &  & \texttt{G-Coup} & \textbf{3} & 8.03$\times$ & $10$ &  &  & \texttt{G-Coup} & 48 & 7.04$\times$ & $10$ \\
-\midrule
-\multirow{8}{*}{15} & \multirow{8}{*}{6} & DPA-TS & -- & -- & $0^{(0, 10)}$ & \multirow{8}{*}{15} & \multirow{8}{*}{7} & DPA-TS & -- & -- & $0^{(0, 10)}$ \\
- &  & DPA-A & -- & -- & $0^{(0, 10)}$ &  &  & DPA-A & -- & -- & $0^{(0, 10)}$ \\
- &  & Coup & 1623 & 1.00$\times$ & $9^{(0, 1)}$ &  &  & Coup & 3544 & 1.00$\times$ & $1^{(0, 9)}$ \\
- &  & \texttt{Coup-4} & 870 & 1.87$\times$ & $10$ &  &  & \texttt{Coup-4} & 2508 & 1.41$\times$ & $3^{(0, 7)}$ \\
- &  & \texttt{Coup-8} & 711 & 2.28$\times$ & $10$ &  &  & \texttt{Coup-8} & 2123 & 1.67$\times$ & $3^{(0, 7)}$ \\
- &  & \texttt{Coup-16} & 641 & 2.53$\times$ & $10$ &  &  & \texttt{Coup-16} & 1930 & 1.84$\times$ & $3^{(0, 7)}$ \\
- &  & \texttt{G-TD} & -- & -- & $0^{(10, 0)}$ &  &  & \texttt{G-TD} & -- & -- & $0^{(10, 0)}$ \\
- &  & \texttt{G-Coup} & \textbf{369} & 4.40$\times$ & $10$ &  &  & \texttt{G-Coup} & \textbf{1828} & 1.94$\times$ & $6^{(3, 1)}$ \\
-\bottomrule
-\end{tabular}
-}
-\label{tab:motsp_result_short}
-\end{table*}
+\clearpage
 
 \section{Related Work}
 \label{sec:related}
@@ -630,8 +605,15 @@ This execution model is well suited for workloads dominated by large numbers of 
 % \end{algorithmic}
 % \end{algorithm}
 
-\section{CPU Implementation}
+\section{Implementation Details}
+\label{app:implementation_details}
+
+This appendix gives pseudocode for implementation details referenced in the main text but omitted there for space. The CPU detail is the pairwise reduction used to merge private cutset frontiers. The GPU details are the lower-level kernels used by Algorithm~\ref{alg:gpu_bidir_pf}.
+
+\subsection{CPU Implementation}
 \label{app:cpu_implementation}
+
+The CPU implementation uses the tree reduction in \Cref{alg:cpu_tree_reduction} to merge private cutset frontiers produced by different workers. This is the reduction referred to in \Cref{sec:cpu_impl_rewrite}.
 
 \begin{algorithm}[htbp]
 \caption{CPU Tree Reduction for Cutset Frontiers}
@@ -654,8 +636,10 @@ This execution model is well suited for workloads dominated by large numbers of 
 \end{algorithmic}
 \end{algorithm}
 
-\section{GPU Implementation}
+\subsection{GPU Implementation}
 \label{app:gpu_implementation}
+
+The GPU implementation expands each selected layer through the four-kernel pipeline described in \Cref{sec:gpu_impl_rewrite}. \Cref{alg:compute_arc_offsets} computes per-arc candidate counts and buffer offsets. \Cref{alg:expand_candidates} then materializes shifted candidate labels in the assigned buffer segments. \Cref{alg:dynamic_1D_kernel} performs load-balanced dominance filtering, and \Cref{alg:compact_survivors} compacts the surviving labels into the next node-frontier representation. Finally, \Cref{alg:materialize_cutset_products} materializes the batched cutset products used by \Cref{alg:gpu_cutset_merge}.
 
 \begin{algorithm}[htbp]
 \caption{Compute Candidate Offsets}
@@ -681,6 +665,8 @@ This execution model is well suited for workloads dominated by large numbers of 
 \end{algorithmic}
 \end{algorithm}
 
+\Cref{alg:expand_candidates} uses the offsets from \Cref{alg:compute_arc_offsets} to write every generated candidate into a disjoint location of the flat buffer.
+
 \begin{algorithm}[htbp]
 \caption{Materialize Layer Candidates}
 \label{alg:expand_candidates}
@@ -698,6 +684,8 @@ This execution model is well suited for workloads dominated by large numbers of 
 \EndProcedure
 \end{algorithmic}
 \end{algorithm}
+
+\Cref{alg:dynamic_1D_kernel} assigns more thread blocks to nodes with larger candidate segments, so the dominance-filtering work is balanced at the level of node-frontier size.
 
 \begin{algorithm}[htbp]
 \caption{Load-Balanced GPU Dominance Filter}
@@ -736,6 +724,8 @@ This execution model is well suited for workloads dominated by large numbers of 
 \end{algorithmic}
 \end{algorithm}
 
+\Cref{alg:compact_survivors} converts the binary survivor flags produced by the dominance kernel into compacted node-frontier storage.
+
 \begin{algorithm}[htbp]
 \caption{Compact Node Frontiers}
 \label{alg:compact_survivors}
@@ -755,6 +745,8 @@ This execution model is well suited for workloads dominated by large numbers of 
 \EndProcedure
 \end{algorithmic}
 \end{algorithm}
+
+\Cref{alg:materialize_cutset_products} is used during the batched cutset merge. It materializes the Cartesian products for a batch of active cutset nodes before filtering and merging them into the running global frontier.
 
 \begin{algorithm}[htbp]
 \caption{Materialize Cutset Products}
@@ -777,8 +769,11 @@ This execution model is well suited for workloads dominated by large numbers of 
 \end{algorithm}
 
 \section{Additional Experimental Results}
+\label{app:additional_results}
 
-\subsection{Results}
+This appendix reports the full set of computational results summarized in \Cref{tab:combined_result_short}. The full MOKP, MOSPP, and MOTSP results are given in \Cref{tab:mokp_result,tab:mospp_result,tab:motsp_result}, respectively.
+
+The complete MOKP runtime comparison is shown in \Cref{tab:mokp_result}.
 \begin{table*}[t]
 \centering
 \scriptsize
@@ -856,6 +851,7 @@ N & K & Method & Time (S) & Speed-up & $S^{(M,T)}$ & N & K & Method & Time (S) &
 \label{tab:mokp_result}
 \end{table*}
 
+The complete MOSPP runtime comparison is shown in \Cref{tab:mospp_result}.
 \begin{table*}[t]
 \centering
 \scriptsize
@@ -906,6 +902,7 @@ N & K & Method & Time (S) & Speed-up & $S^{(M,T)}$ & N & K & Method & Time (S) &
 \label{tab:mospp_result}
 \end{table*}
 
+The complete MOTSP runtime comparison is shown in \Cref{tab:motsp_result}.
 \begin{table*}[t]
 \centering
 \scriptsize
