@@ -88,8 +88,8 @@ An objective vector $\mathbf{y}^\star = \mathbf{f}(\mathbf{x}^\star)$ associated
 
 
 \begin{algorithm}[t!]
-\caption{Coupled Pareto Frontier Enumeration}
-\label{alg:coupled_pf}
+\caption{Bidirectional PF Enumeration}
+\label{alg:bidir_pf}
 \begin{algorithmic}[1]
 \Require Exact decision diagram $\mathcal{D} = (\mathcal{N}, \mathcal{A})$ with layers $\mathcal{L}_1, \dots, \mathcal{L}_{n+1}$
 \Procedure{FilterDominated}{$\mathcal{Y}$} \Comment{$\mathcal{O}(|\mathcal{Y}|^2)$}
@@ -149,18 +149,18 @@ Let $\mathcal{X}_{\mathcal{D}} = \{ \mathbf{x}(p) \mid p \text{ is an } \mathbf{
 During enumeration, each DD node stores a \emph{node frontier}: a nondominated set of objective vectors associated with partial paths through that node. In the root-side direction, $\mathcal{Y}^{\downarrow}(u)$ denotes the node frontier of partial paths from the root $\mathbf{r}$ to node $u$; in the terminal-side direction, $\mathcal{Y}^{\uparrow}(u)$ denotes the node frontier of partial paths from $u$ to the terminal $\mathbf{t}$. Individual objective vectors in a node frontier are called \emph{labels}. Newly generated, unfiltered labels are called \emph{candidate labels}. During cutset merging, a \emph{global frontier} denotes a running nondominated set over complete root-to-terminal labels. We reserve \emph{Pareto frontier} for the final nondominated set $\mathcal{Y}_N$.
 
 
-To extract this exact Pareto frontier $\mathcal{Y}_N$ from an exact decision diagram $\mathcal{D}$, we can employ the \emph{coupled enumeration scheme}, which dynamically interleaves root-side and terminal-side layer expansion, as detailed in \Cref{alg:coupled_pf}. This dynamic layer cutset methodology mitigates intermediate node-frontier growth. Initially, a root-side layer pointer $i_{\text{td}}$ is set to layer 1 and a terminal-side pointer $i_{\text{bu}}$ is set to layer $n+1$. At each step, the scheme dynamically decides whether to expand the root-side node frontiers $\mathcal{Y}^{\downarrow}$ to layer $i_{\text{td}}+1$ or the terminal-side node frontiers $\mathcal{Y}^{\uparrow}$ to layer $i_{\text{bu}}-1$. This process continues until the two directions meet at a \emph{cutset} layer $c$ (i.e., $i_{\text{td}} = i_{\text{bu}}$). Finally, for each node $u \in \mathcal{L}_c$, the algorithm computes the pairwise sums of labels in its root-side and terminal-side node frontiers (\Cref{alg:coupled_pf}, line 35). The merging of these combined sets and the repeated application of a dominance filter produce the exact Pareto frontier $\mathcal{Y}_N$.
+To extract this exact Pareto frontier $\mathcal{Y}_N$ from an exact decision diagram $\mathcal{D}$, we can employ \emph{bidirectional PF enumeration}, which dynamically interleaves root-side and terminal-side layer expansion, as detailed in \Cref{alg:bidir_pf}. This dynamic layer cutset methodology mitigates intermediate node-frontier growth. Initially, a root-side layer pointer $i_{\text{td}}$ is set to layer 1 and a terminal-side pointer $i_{\text{bu}}$ is set to layer $n+1$. At each step, the scheme dynamically decides whether to expand the root-side node frontiers $\mathcal{Y}^{\downarrow}$ to layer $i_{\text{td}}+1$ or the terminal-side node frontiers $\mathcal{Y}^{\uparrow}$ to layer $i_{\text{bu}}-1$. This process continues until the two directions meet at a \emph{cutset} layer $c$ (i.e., $i_{\text{td}} = i_{\text{bu}}$). Finally, for each node $u \in \mathcal{L}_c$, the algorithm computes the pairwise sums of labels in its root-side and terminal-side node frontiers (\Cref{alg:bidir_pf}, line 35). The merging of these combined sets and the repeated application of a dominance filter produce the exact Pareto frontier $\mathcal{Y}_N$.
 
 \section{Parallel Decision Diagram-based Pareto Frontier Enumeration}
 \label{sec:method}
 \label{sec:method_rewrite}
 
-This section describes how we parallelize exact Pareto frontier enumeration on a decision diagram (DD), following the dynamic layer cutset scheme in \Cref{alg:coupled_pf}. The rule that chooses which side of the cutset to expand is inherited from the serial enumeration method. Our contribution is the parallel execution of the expensive primitives inside the enumeration: candidate generation, dominance filtering, cutset coupling, and frontier merging.
+This section describes how we parallelize exact Pareto frontier enumeration on a decision diagram (DD), following the bidirectional PF enumeration scheme in \Cref{alg:bidir_pf}. The rule that chooses which side of the cutset to expand is inherited from the serial enumeration method. Our contribution is the parallel execution of the expensive primitives inside the enumeration: candidate generation, dominance filtering, cutset-product materialization, and frontier merging.
 
 \subsection{Sources of Parallelism}
 \label{sec:parallel_primitives_rewrite}
 
-The opportunities for parallelism are most easily seen directly from Algorithm~\ref{alg:coupled_pf}. In the root-side expansion, the loop over nodes in line~5 can be parallelized because the node frontier of each destination node is updated independently once the previous layer has been finalized. The same observation applies to the terminal-side expansion in line~14. The work performed inside a node consists of scanning adjacent arcs, generating candidate labels, merging them into the node frontier, and applying the dominance filter in lines~7 and~17.
+The opportunities for parallelism are most easily seen directly from Algorithm~\ref{alg:bidir_pf}. In the root-side expansion, the loop over nodes in line~5 can be parallelized because the node frontier of each destination node is updated independently once the previous layer has been finalized. The same observation applies to the terminal-side expansion in line~14. The work performed inside a node consists of scanning adjacent arcs, generating candidate labels, merging them into the node frontier, and applying the dominance filter in lines~7 and~17.
 
 There is a second, finer level of parallelism inside lines~7 and~17. The candidate labels generated for a node can be materialized independently, and the pairwise dominance comparisons among those candidate labels can also be distributed. This finer decomposition requires an explicit candidate buffer and a careful layout so that different workers write to disjoint locations. It is therefore a different implementation choice from assigning one worker to own an entire node frontier.
 
@@ -178,7 +178,7 @@ These products are independent across cutset nodes and across pairs of labels wi
 \subsection{CPU Implementation}
 \label{sec:cpu_impl_rewrite}
 
-The CPU implementation parallelizes the node loops in Algorithm~\ref{alg:coupled_pf}. For root-side expansion, this is the loop in line~5; for terminal-side expansion, it is the loop in line~14. The loop is scheduled dynamically because the number of candidate labels can vary substantially across nodes in the same layer.
+The CPU bidirectional PF enumeration implementation parallelizes the node loops in Algorithm~\ref{alg:bidir_pf}. For root-side expansion, this is the loop in line~5; for terminal-side expansion, it is the loop in line~14. The loop is scheduled dynamically because the number of candidate labels can vary substantially across nodes in the same layer.
 
 Each CPU worker owns the node frontier of the node it is assigned. It scans the relevant arcs, generates candidate labels, merges them into the node frontier, and applies the dominance filter corresponding to lines~7 and~17. Since no other worker mutates that node frontier, the implementation avoids locks. The limitation is that a single large node remains serial within one worker; the CPU implementation does not split the dominance filtering of one node across multiple workers.
 
@@ -187,11 +187,11 @@ The CPU also parallelizes the cutset products in lines~31--33. Each worker proce
 \subsection{GPU Implementation}
 \label{sec:gpu_impl_rewrite}
 
-The GPU implementation follows the same enumeration logic as Algorithm~\ref{alg:coupled_pf}, but changes the unit of work. Rather than assigning one worker to own a node frontier, it materializes candidate labels in flat buffers and then applies data-parallel filtering and compaction kernels. The high-level procedure is shown in \Cref{alg:gpu_coupled_pf}: the DD is first flattened, each selected layer expansion invokes the same four-kernel pipeline, and the cutset phase is handled by a separate batched coupling routine.
+The GPU implementation follows the same enumeration logic as Algorithm~\ref{alg:bidir_pf}, but changes the unit of work. Rather than assigning one worker to own a node frontier, it materializes candidate labels in flat buffers and then applies data-parallel filtering and compaction kernels. The high-level procedure is shown in \Cref{alg:gpu_bidir_pf}: the DD is first flattened, each selected layer expansion invokes the same four-kernel pipeline, and the cutset phase is handled by a separate batched cutset-merge routine.
 
 \begin{algorithm}[t!]
-\caption{GPU-Accelerated Coupled Pareto Frontier Enumeration}
-\label{alg:gpu_coupled_pf}
+\caption{GPU Bidirectional PF Enumeration}
+\label{alg:gpu_bidir_pf}
 \begin{algorithmic}[1]
 \Require DD $\mathcal{D}$ with layers $\mathcal{L}_1,\dots,\mathcal{L}_{n+1}$
 
@@ -246,7 +246,7 @@ The GPU implementation follows the same enumeration logic as Algorithm~\ref{alg:
     \EndIf
 \EndWhile
 \State $c \gets i_{\text{td}}$ \Comment{Cutset layer}
-\State $\mathcal{Y}_N \gets$ \Call{CutsetCoupling}{$\mathcal{Y}^{\downarrow}, \mathcal{Y}^{\uparrow}, \mathcal{L}_c$}
+\State $\mathcal{Y}_N \gets$ \Call{CutsetMerge}{$\mathcal{Y}^{\downarrow}, \mathcal{Y}^{\uparrow}, \mathcal{L}_c$}
 \State \Return $\mathcal{Y}_N$
 \end{algorithmic}
 \end{algorithm}
@@ -255,7 +255,7 @@ The GPU implementation follows the same enumeration logic as Algorithm~\ref{alg:
 
 The flattened representation stores, for each layer and traversal direction, the relevant source or destination node index for each arc, the arc weight vector, and a per-node arc-offset array. This layout makes each layer expansion a segmented operation over contiguous arc and candidate arrays. The representation is built once and reused throughout the enumeration.
 
-For a selected layer, \Cref{alg:gpu_coupled_pf} calls the four subroutines in \Cref{alg:compute_arc_offsets,alg:expand_candidates,alg:dynamic_1D_kernel,alg:compact_survivors}. The dataflow is
+For a selected layer, \Cref{alg:gpu_bidir_pf} calls the four subroutines in \Cref{alg:compute_arc_offsets,alg:expand_candidates,alg:dynamic_1D_kernel,alg:compact_survivors}. The dataflow is
 \[
     \mathcal{Y}
     \rightarrow (\kappa,\phi^c,\Gamma)
@@ -265,114 +265,15 @@ For a selected layer, \Cref{alg:gpu_coupled_pf} calls the four subroutines in \C
 \]
 Here $\kappa_a$ is the number of candidate labels generated by arc $a$, $\phi^c_a$ is the starting offset of arc $a$ in the flat candidate buffer, and $\Gamma_v$ is the total number of candidate labels assigned to destination node $v$. The buffer $\beta$ stores the generated candidate labels, and the binary vector $\sigma$ marks the labels that survive node-frontier dominance filtering.
 
-First, \Cref{alg:compute_arc_offsets} counts how many candidate labels each arc will produce and uses a prefix sum to assign disjoint output segments in $\beta$. Second, \Cref{alg:expand_candidates} fills this buffer with shifted labels. The prefix-sum offsets are the key invariant: candidate labels generated by different arcs write to disjoint memory, but candidate labels for the same destination node occupy one contiguous segment. Third, \Cref{alg:dynamic_1D_kernel} filters each destination-node segment using a load-balanced grid of thread blocks; nodes with larger candidate label sets receive more blocks. Fourth, \Cref{alg:compact_survivors} compacts the surviving labels into the next node-frontier representation. These four steps implement the parallelization of candidate generation, merging, and dominance filtering in lines~7 and~17 of Algorithm~\ref{alg:coupled_pf}.
+First, \Cref{alg:compute_arc_offsets} counts how many candidate labels each arc will produce and uses a prefix sum to assign disjoint output segments in $\beta$. Second, \Cref{alg:expand_candidates} fills this buffer with shifted labels. The prefix-sum offsets are the key invariant: candidate labels generated by different arcs write to disjoint memory, but candidate labels for the same destination node occupy one contiguous segment. Third, \Cref{alg:dynamic_1D_kernel} filters each destination-node segment using a load-balanced grid of thread blocks; nodes with larger candidate label sets receive more blocks. Fourth, \Cref{alg:compact_survivors} compacts the surviving labels into the next node-frontier representation. These four steps implement the parallelization of candidate generation, merging, and dominance filtering in lines~7 and~17 of Algorithm~\ref{alg:bidir_pf}.
 
-\begin{algorithm}[tbp]
-\caption{GPU Subroutine: Compute Arc Offsets}
-\label{alg:compute_arc_offsets}
-\begin{algorithmic}[1]
-\Require Frontier $\mathcal{Y}$; source-node array $b[]$; incoming-arc offsets $\phi^a[]$
-\Procedure{ComputeArcOffsets}{$\mathcal{Y}, b, \phi^a$}
-\State $M \gets |\mathcal{A}_{\mathcal{L}_j}|$ \Comment{Number of arcs in layer $j$}
-\ForAll{arcs $a = 0$ \textbf{to} $M-1$ \textbf{in parallel on GPU}} \Comment{One thread per arc}
-    \State $\kappa_a \gets |\mathcal{Y}(b(a))|$
-\EndFor
-\State $\phi^c_0 \gets 0$
-\For{$a = 1$ \textbf{to} $M$ \textbf{in parallel on GPU}}
-    \State $\phi^c_a \gets \phi^c_{a-1} + \kappa_{a-1}$
-\EndFor
-\ForAll{nodes $v \in \mathcal{L}_{j+1}$ \textbf{in parallel on GPU}}
-    \State $a_{\text{first}} \gets \phi^a_v$
-    \State $a_{\text{last}} \gets \phi^a_{v{+}1}$
-    \State $\Gamma_v \gets \phi^c_{a_{\text{last}}} - \phi^c_{a_{\text{first}}}$
-\EndFor
-\State \Return $\kappa, \phi^c, \Gamma$
-\EndProcedure
-\end{algorithmic}
-\end{algorithm}
-
-\begin{algorithm}[tbp]
-\caption{GPU Subroutine: Expand Candidates into Flat Buffer}
-\label{alg:expand_candidates}
-\begin{algorithmic}[1]
-\Require Frontier $\mathcal{Y}$; source array $b[]$; arc weights $\mathbf{v}(\cdot)$; offsets $\phi^c[]$; counts $\kappa[]$
-\Procedure{ExpandCandidates}{$\mathcal{Y}, b, \mathbf{v}, \phi^c, \kappa$}
-\State Allocate flat buffer $\beta$ of size $\sum_a \kappa_a$
-\ForAll{arcs $a$ \textbf{in parallel on GPU}}
-    \State //~One warp (32 threads) per arc
-    \ForAll{$k = 0, 1, \dots, \kappa_a{-}1$ \textbf{distributed across warp threads}}
-        \State $\beta[\,\phi^c_a + k\,] \gets \mathcal{Y}(b(a))[k] + \mathbf{v}(a)$
-    \EndFor
-\EndFor
-\State \Return $\beta$
-\EndProcedure
-\end{algorithmic}
-\end{algorithm}
-
-\begin{algorithm}[tbp]
-\caption{GPU Dominance Filtering: Dynamic 1D Load-Balanced Scheduling}
-\label{alg:dynamic_1D_kernel}
-\begin{algorithmic}[1]
-\Require Flat candidate buffer $\beta$; per-node candidate counts $\Gamma[]$; block size $B$
-\Procedure{FilterDominated}{$\beta, \Gamma$}
-\State $K[v] \gets \lceil \Gamma[v] / B \rceil$ for all $v$
-\State $\phi^k_0 \gets 0$
-\For{$v = 1$ \textbf{to} $|\mathcal{L}_{j+1}|$ \textbf{in parallel on GPU}}
-    \State $\phi^k_v \gets \phi^k_{v-1} + K[v-1]$
-\EndFor
-\State $\sigma_i \gets 1$ for all candidates $i$
-\ForAll{thread blocks $q = 0, \dots, \sum_v K[v] - 1$ \textbf{in parallel on GPU}}
-    \State Binary search $\phi^k$ to find node $v$ s.t.\ $\phi^k_v \le q < \phi^k_{v{+}1}$
-    \State $\tau \gets q - \phi^k_v$ \Comment{Tile index within node $v$}
-    \State $[b,\, e) \gets$ candidate range of node $v$ in $\beta$
-    \State $i \gets b + \tau \cdot B + \text{thread index within block}$
-    \State \textbf{Load} $\mathbf{y}_i \gets \beta[i]$ into per-thread register (if $i < e$) \Comment{Reused across tiles}
-    \State $\mathit{dominated} \gets \mathbf{false}$
-    \For{tile start $s = b$ \textbf{to} $e{-}1$, \textbf{step} $B$}
-        \State \textbf{Barrier}: wait for all threads in block
-        \State Each thread $k$ loads $\beta[s{+}k]$ into \textbf{shared memory} slot $k$ \;(if $s{+}k < e$)
-        \State \textbf{Barrier}: ensure tile is fully visible
-        \If{$i < e$ \textbf{and not} $\mathit{dominated}$}
-            \For{$j = 0$ \textbf{to} $\min(B,\, e{-}s){-}1$, \textbf{skip} $j = i{-}b{-}\tau B$}
-                \If{shared[$j$] $\prec \mathbf{y}_i$}\; $\mathit{dominated} \gets \mathbf{true}$; \textbf{break} \EndIf
-            \EndFor \Comment{Early exit within tile}
-        \EndIf
-        \If{$\mathit{dominated}$} \textbf{break} \EndIf \Comment{Early exit across tiles}
-    \EndFor
-    \If{$i < e$ \textbf{and} $\mathit{dominated}$}\; $\sigma_i \gets 0$ \EndIf
-\EndFor
-\State \Return $\sigma$
-\EndProcedure
-\end{algorithmic}
-\end{algorithm}
-
-\begin{algorithm}[tbp]
-\caption{GPU Subroutine: Compact Survivors}
-\label{alg:compact_survivors}
-\begin{algorithmic}[1]
-\Require Candidate buffer $\beta$ of size $S$; binary survivor flags $\sigma[]$
-\Procedure{CompactSurvivors}{$\beta, \sigma$}
-\State $\rho_0 \gets 0$
-\For{$i = 1$ \textbf{to} $S$} \Comment{Parallel prefix sum on GPU}
-    \State $\rho_i \gets \rho_{i-1} + \sigma_{i-1}$
-\EndFor
-\ForAll{candidates $i = 0$ \textbf{to} $S-1$ \textbf{in parallel on GPU}} \Comment{One thread per candidate}
-    \If{$\sigma_i = 1$}
-        \State $\mathcal{Y}(v)[\,\rho_i\,] \gets \beta[i]$ \Comment{$v$: destination node of $i$}
-    \EndIf
-\EndFor
-\State \Return $\mathcal{Y}$
-\EndProcedure
-\end{algorithmic}
-\end{algorithm}
-
-The cutset phase uses a different schedule, shown in \Cref{alg:gpu_cutset_coupling}. Active cutset nodes are those with nonempty root-side and terminal-side node frontiers. They are sorted by node-frontier size and processed in product-bounded batches so that the Cartesian product for a batch fits in memory. For each batch, \Cref{alg:materialize_cutset_products} materializes all sums $\mathbf{y}^{\downarrow}+\mathbf{y}^{\uparrow}$ corresponding to lines~31--33 of Algorithm~\ref{alg:coupled_pf}. The batch is then filtered against the current global frontier, self-pruned, and merged into the running global frontier. Thus the GPU does not use the CPU tree reduction in \Cref{alg:cpu_tree_reduction}; it uses a batched running-frontier merge, where batching is both a load-balancing mechanism and a memory-control mechanism.
+The cutset phase uses a different schedule, shown in \Cref{alg:gpu_cutset_merge}. Active cutset nodes are those with nonempty root-side and terminal-side node frontiers. They are sorted by node-frontier size and processed in product-bounded batches so that the Cartesian product for a batch fits in memory. For each batch, \Cref{alg:materialize_cutset_products} materializes all sums $\mathbf{y}^{\downarrow}+\mathbf{y}^{\uparrow}$ corresponding to lines~31--33 of Algorithm~\ref{alg:bidir_pf}. The batch is then filtered against the current global frontier, self-pruned, and merged into the running global frontier. Thus the GPU does not use the CPU tree reduction in \Cref{alg:cpu_tree_reduction}; it uses a batched running-frontier merge, where batching is both a load-balancing mechanism and a memory-control mechanism.
 
 Batching does not change the set being computed. After each batch is processed, the running frontier is the nondominated union of all cutset products seen so far. Filtering a new batch against this frontier removes points already dominated by earlier batches, and the final mutual merge removes earlier points dominated by the new survivors. The result is therefore the same nondominated union over all active cutset nodes, but evaluated with bounded intermediate memory.
 
 \begin{algorithm}[tbp!]
-\caption{GPU Subroutine: Cutset Coupling}
-\label{alg:gpu_cutset_coupling}
+\caption{GPU Subroutine: Batched Cutset Merge}
+\label{alg:gpu_cutset_merge}
 \begin{algorithmic}[1]
 \Require Cutset nodes $\mathcal{L}_c$; frontiers $\mathcal{Y}^{\downarrow}(v)$, $\mathcal{Y}^{\uparrow}(v)$ and sizes $\kappa^{\downarrow}_v$, $\kappa^{\uparrow}_v$ for all $v \in \mathcal{L}_c$; candidate batch limit $B_{\max}$
 \State $\mathcal{V}^*_c \gets \{v \in \mathcal{L}_c \mid \kappa^{\downarrow}_v > 0 \text{ and } \kappa^{\uparrow}_v > 0\}$ \Comment{Active nodes}
@@ -390,26 +291,6 @@ Batching does not change the set being computed. After each batch is processed, 
     \State $\mathcal{Y}^{\text{global}} \gets$ \Call{MergeFrontiers}{$\mathcal{Y}^{\text{global}}, \beta$} \Comment{Mutual pruning and concatenation}
 \EndFor
 \State \Return $\mathcal{Y}^{\text{global}}$
-\end{algorithmic}
-\end{algorithm}
-
-\begin{algorithm}[tbp]
-\caption{GPU Subroutine: Materialize Cutset Products}
-\label{alg:materialize_cutset_products}
-\begin{algorithmic}[1]
-\Require Frontiers $\mathcal{Y}^{\downarrow}$, $\mathcal{Y}^{\uparrow}$; node offsets $\phi^{\downarrow}$, $\phi^{\uparrow}$ and sizes $\kappa^{\downarrow}$, $\kappa^{\uparrow}$ for nodes in batch $\mathcal{B}$; product offsets $\phi^p$
-\Procedure{MaterializeProducts}{$\mathcal{Y}^{\downarrow}, \mathcal{Y}^{\uparrow}, \mathcal{B}$}
-\State Allocate flat candidate buffer $\beta$ of size $\sum_{v \in \mathcal{B}} \kappa^{\downarrow}_v \cdot \kappa^{\uparrow}_v$
-\ForAll{nodes $v \in \mathcal{B}$ \textbf{in parallel on GPU}} \Comment{One thread block per node}
-    \State $T \gets \kappa^{\downarrow}_v \cdot \kappa^{\uparrow}_v$ \Comment{Total candidates for node $v$}
-    \ForAll{candidate indices $p = 0, \dots, T-1$ \textbf{in parallel}}
-        \State $i \gets \lfloor p / \kappa^{\uparrow}_v \rfloor$; \quad $j \gets p \pmod{\kappa^{\uparrow}_v}$
-        \State $y^{\downarrow} \gets \mathcal{Y}^{\downarrow}(\phi^{\downarrow}_v + i)$; \quad $y^{\uparrow} \gets \mathcal{Y}^{\uparrow}(\phi^{\uparrow}_v + j)$
-        \State $\beta[\,\phi^p_v + p\,] \gets y^{\downarrow} + y^{\uparrow}$
-    \EndFor
-\EndFor
-\State \Return $\beta$
-\EndProcedure
 \end{algorithmic}
 \end{algorithm}
 
@@ -431,11 +312,11 @@ Our computational evaluation aims to answer the following key research questions
 \subsection{Experimental Setup}
 We conducted all experiments on a compute cluster equipped with an Intel Xeon 6972P CPU running at 2.4\,GHz and an NVIDIA H100 GPU. Across all experiments, the CPU memory limit was set to 16\,GB and the GPU memory limit was set to 20\,GB, with a one-hour time limit per instance. Our parallel PF enumeration algorithms were implemented on top of the C++ code of \citet{bergman2022network}. Specifically, we used C++14 with OpenMP 4.5 for CPU parallelism and NVCC 12.6 for GPU acceleration.
 
-We evaluate the proposed methods on MOKP, MOSPP, and MOTSP. The test instances are taken from \citet{bergman2022network}. We report results for instance sizes on which their best method, namely coupled enumeration (\texttt{Coup} or \texttt{Coup}$^+$), required at least 5 seconds of total runtime. For each instance size, the test set contains 10 instances.
+We evaluate the proposed methods on MOKP, MOSPP, and MOTSP. The test instances are taken from \citet{bergman2022network}. We report results for instance sizes on which their best method, namely bidirectional PF enumeration (reported as \texttt{Coup} or \texttt{Coup}$^+$), required at least 5 seconds of total runtime. For each instance size, the test set contains 10 instances.
 
-We compare our approach against the serial coupled enumeration method of \citet{bergman2022network}, denoted by \text{Coup} or \text{Coup}$^+$. The ``+'' suffix indicates that state-dominance-based label pruning is used in addition to coupled enumeration. To ensure a fair comparison, we use the implementation provided by \citet{bergman2022network}, rather than our modified implementation, which can also perform serial PF enumeration. We further compare against the defining point algorithm (DPA) proposed in \citet{dachert2024simple}, which, to the best of our knowledge, is a state-of-the-art MIP-based approach for multiobjective discrete optimization with support for more than two objectives. We refer to the two variants of this algorithm as DPA-A and DPA-TS.
+We compare our approach against the serial bidirectional PF enumeration method of \citet{bergman2022network}, denoted by \text{Coup} or \text{Coup}$^+$. The ``+'' suffix indicates that state-dominance-based label pruning is used in addition to bidirectional PF enumeration. To ensure a fair comparison, we use the implementation provided by \citet{bergman2022network}, rather than our modified implementation, which can also perform serial PF enumeration. We further compare against the defining point algorithm (DPA) proposed in \citet{dachert2024simple}, which, to the best of our knowledge, is a state-of-the-art MIP-based approach for multiobjective discrete optimization with support for more than two objectives. We refer to the two variants of this algorithm as DPA-A and DPA-TS.
 
-Our CPU-based parallel variants are referred to as \texttt{Coup-T} (or $\texttt{Coup}^+\texttt{-T}$), where \texttt{T} specifies the number of parallel threads. The GPU variants are called $\texttt{G-Coup}$ or $\texttt{G-Coup}^{+}$. he corresponding GPU variants are denoted by \texttt{G-Coup} and \texttt{G-Coup}$^+$. We report the enumeration wall-clock time in seconds (``Time (s)''), the speed-up w.r.t. the Coup or Coup+ and the tuple ``(M, T)'' reports the number of instances that failed due to out-of-memory errors (M) and time-out limits (T).
+The CPU bidirectional PF enumeration variants are reported as \texttt{Coup-T} (or $\texttt{Coup}^+\texttt{-T}$), where \texttt{T} specifies the number of parallel threads. The GPU bidirectional PF enumeration variants are reported as \texttt{G-Coup} and \texttt{G-Coup}$^+$. We report the enumeration wall-clock time in seconds (``Time (s)''), the speed-up w.r.t.\ \texttt{Coup} or \texttt{Coup}$^+$, and the tuple ``(M, T)'', which gives the number of instances that failed due to out-of-memory errors (M) and time-out limits (T).
 
 \subsection{Results}
 \paragraph{RQ1 (MIP vs. Serial DD).}
@@ -551,7 +432,7 @@ Our work is related to two lines of research: exact algorithms for multiobjectiv
 \label{sec:related_exact}
 Exact algorithms for multiobjective discrete optimization are commonly divided into criterion-space, decision-space, and dynamic-programming or state-space approaches; see \citet{ehrgott2016exact,halffmann2022exact} for surveys. Criterion-space methods enumerate nondominated points by repeatedly solving scalarized or constrained single-objective subproblems while partitioning the unexplored objective space. Representative examples include recursive and box-decomposition schemes \citep{ozlen2009multi,ozlen2014multi,boland2015criterion}, parameter-space search \citep{kirlik2014new}, and recent objective-space algorithms for multiobjective integer programming \citep{dachert2024simple,tamby2020generic}. Decision-space methods instead generalize branch-and-bound or branch-and-cut to vector-valued bounds and dominance-based fathoming \citep{jozefowiez2012generic,przybylski2017multi,parragh2019branch,adelgren2022branch}.
 
-Dynamic-programming and state-space methods propagate sets of nondominated labels through a recursive model. Decision diagrams belong to this family. \citet{cire2016multiobjective} introduced multiobjective optimization by DDs, and \citet{bergman2022network} developed network models and reduction operations that make exact Pareto frontier enumeration competitive when a compact DD representation is available. Our work builds on this DD-based state-space approach. We do not change the exact enumeration model; instead, we parallelize its dominant operations: label generation, dominance filtering, cutset coupling, and frontier merging.
+Dynamic-programming and state-space methods propagate sets of nondominated labels through a recursive model. Decision diagrams belong to this family. \citet{cire2016multiobjective} introduced multiobjective optimization by DDs, and \citet{bergman2022network} developed network models and reduction operations that make exact Pareto frontier enumeration competitive when a compact DD representation is available. Our work builds on this DD-based state-space approach. We do not change the exact enumeration model; instead, we parallelize its dominant operations: label generation, dominance filtering, cutset-product materialization, and frontier merging.
 
 \subsection{Parallel Computing for Discrete Optimization}
 Parallel computing has long been used to accelerate exact discrete optimization \citep{kindervater1986introduction}. Much of the classical work focuses on branch-and-bound, where parallelism comes from distributing search-tree nodes across processors \citep{gendron1994parallel,ralphs2003parallel,linderoth2003decomposition}. Such methods can scale well when the tree is effectively partitioned, but they also exhibit search-order effects such as the parallel branch-and-bound anomalies studied by \citet{lai1984anomalies}. Parallelism has also been studied in DD-based optimization: \citet{bergman2014parallel} proposed a parallel DD-based branch-and-bound framework that distributes DD node exploration across processors.
@@ -656,7 +537,7 @@ GPUs are throughput-oriented processors that achieve high performance by executi
     \label{fig:gpu_arch}
 \end{figure}
 The memory system is also hierarchical. Threads within an SM have access to fast on-chip storage, including registers and shared memory, which enables efficient intra-block cooperation and synchronization. SMs connect to a larger, device-wide cache (L2) and ultimately to high-capacity but high-latency global memory (DRAM). Effective GPU implementations therefore aim to expose ample parallelism while limiting expensive global-memory traffic \cite{nickolls2010gpu}.
-This execution model is well suited for workloads dominated by large numbers of independent arithmetic operations and comparisons. In particular, pairwise dominance checks required during PF enumeration in Algorithm~\ref{alg:coupled_pf} are natural candidates for GPU acceleration.
+This execution model is well suited for workloads dominated by large numbers of independent arithmetic operations and comparisons. In particular, pairwise dominance checks required during PF enumeration in Algorithm~\ref{alg:bidir_pf} are natural candidates for GPU acceleration.
 
 
 
@@ -671,7 +552,7 @@ This execution model is well suited for workloads dominated by large numbers of 
 % \subsubsection{Single thread per node}
 % In this scheme, we exploit the inherent independence of nodes within the same layer to achieve parallelism. Specifically, the processing of any node $v \in \mathcal{L}_{j+1}$ relies exclusively on the finalized objective vectors of its predecessor nodes $u \in \mathcal{L}_j$. Because the operations performed on different destination nodes do not mutate or conflict with one another's memory space, we can process multiple nodes concurrently by assigning a single, dedicated execution thread to each node.
 
-% For instance, in the coupled enumeration scheme (Algorithm~\ref{alg:coupled_pf}), the execution of \textsc{ExpandTopDown} (lines 5--10) and \textsc{ExpandBottomUp} (lines 14--19) can be parallelized over the outer loop of destination nodes. Furthermore, at the cutset layer $\mathcal{L}_c$, the convolution of the top-down and bottom-up frontiers (lines 34--36) can be parallelized across individual nodes since each convolution operates strictly on local label sets $\mathcal{Y}^{\downarrow}(u)$ and $\mathcal{Y}^{\uparrow}(u)$ associated with node $u$. By mapping a single thread per node, this scheme circumvents data races without the need for expensive thread synchronization mechanisms like locks.
+% For instance, in the coupled enumeration scheme (Algorithm~\ref{alg:bidir_pf}), the execution of \textsc{ExpandTopDown} (lines 5--10) and \textsc{ExpandBottomUp} (lines 14--19) can be parallelized over the outer loop of destination nodes. Furthermore, at the cutset layer $\mathcal{L}_c$, the convolution of the top-down and bottom-up frontiers (lines 34--36) can be parallelized across individual nodes since each convolution operates strictly on local label sets $\mathcal{Y}^{\downarrow}(u)$ and $\mathcal{Y}^{\uparrow}(u)$ associated with node $u$. By mapping a single thread per node, this scheme circumvents data races without the need for expensive thread synchronization mechanisms like locks.
 
 % \subsubsection{Multiple threads per node}
 % While assigning a single thread per node is straightforward, the overall enumeration can be further accelerated by utilizing multiple threads to process a single node collaboratively. However, a naive implementation of such a scheme presents significant synchronization hazards. Consider the \textsc{ExpandTopDown} procedure, where multiple incoming arcs $(u,v)$ contribute to the same destination node $v$. A simplistic approach to multi-threading this step would be to assign a separate thread to each incoming arc. Each thread would expand the labels of the parent node of its assigned arc and attempt to merge and filter the generated candidates directly into the destination node's shared set, $\mathcal{Y}^{\downarrow}(v)$. This introduces the following critical synchronization issues.
@@ -689,11 +570,11 @@ This execution model is well suited for workloads dominated by large numbers of 
 % The CPU implementation directly realizes the single thread per node parallelization scheme. At each layer $j$, the loop over destination nodes $v \in \mathcal{L}_{j+1}$ is parallelized with a \emph{dynamic work-stealing} schedule: since the number of incoming candidate labels per node varies widely across a layer, a static round-robin assignment would leave many cores idle while others process large frontier sets. Each assigned core processes all incoming arcs $(u,v)$ for its node sequentially, accumulating the Minkowski sums $\mathcal{Y}^{\downarrow}(u) \oplus \{\mathbf{v}(a)\}$ and applying the $\mathcal{O}(|\mathcal{Y}|^2)$ dominance filter entirely in thread-local memory, requiring no locks or synchronization. However, a core assigned to a node with a very large local frontier cannot offload work to idle cores, throttling the entire layer's throughput. This load-imbalance limitation motivates the GPU design below.
 
 % \subsubsection{Graphics Processing Unit}
-% The GPU is well-suited to realize the multiple threads per node scheme: its massively parallel architecture executes thousands of lightweight threads concurrently, making it ideal for absorbing the data-parallelism in candidate generation and dominance filtering. \Cref{alg:gpu_coupled_pf} presents the GPU-accelerated coupled enumeration, which interleaves top-down and bottom-up layer expansions on the GPU, each decomposed into four data-parallel passes that call the subroutines in Algorithms~\ref{alg:compute_arc_offsets}--\ref{alg:compact_survivors}.
+% The GPU is well-suited to realize the multiple threads per node scheme: its massively parallel architecture executes thousands of lightweight threads concurrently, making it ideal for absorbing the data-parallelism in candidate generation and dominance filtering. \Cref{alg:gpu_bidir_pf} presents the GPU-accelerated coupled enumeration, which interleaves top-down and bottom-up layer expansions on the GPU, each decomposed into four data-parallel passes that call the subroutines in Algorithms~\ref{alg:compute_arc_offsets}--\ref{alg:compact_survivors}.
 
-% The \textsc{FlattenDD} subroutine in Algorithm~\ref{alg:gpu_coupled_pf} serializes the entire DD's arc connectivity for both traversal directions. For each layer $\mathcal{L}_j$, three groups of flat arrays are built. For \emph{top-down} expansion: the source-node index array $b^{\downarrow}[]$, the weight-vector array $\mathbf{v}^{\downarrow}[]$ (one $m$-vector per arc), and the per-node incoming-arc offset array $\phi^{a,\downarrow}[]$ (a CSR-style length-$(|\mathcal{L}_j|{+}1)$ array whose $k$-th entry is the index of the first incoming arc of node $k$). For \emph{bottom-up} expansion: the symmetric arrays $b^{\uparrow}[]$, $\mathbf{v}^{\uparrow}[]$, and $\phi^{a,\uparrow}[]$ built from outgoing arcs. The per-node out-degree $\delta^{\text{out}}[]$ and in-degree $\delta^{\text{in}}[]$ are packed for the scoring heuristic. All arrays are transferred to GPU global memory, amortizing the packing cost across all layer expansions. Back in the main procedure of Algorithm~\ref{alg:gpu_coupled_pf}, the top-down frontier is initialized with $\mathcal{Y}^{\downarrow}(\mathbf{r}) = \{\mathbf{0}\}$ at the root and the bottom-up frontier with $\mathcal{Y}^{\uparrow}(\mathbf{t}) = \{\mathbf{0}\}$ at the terminal, both in GPU memory.
+% The \textsc{FlattenDD} subroutine in Algorithm~\ref{alg:gpu_bidir_pf} serializes the entire DD's arc connectivity for both traversal directions. For each layer $\mathcal{L}_j$, three groups of flat arrays are built. For \emph{top-down} expansion: the source-node index array $b^{\downarrow}[]$, the weight-vector array $\mathbf{v}^{\downarrow}[]$ (one $m$-vector per arc), and the per-node incoming-arc offset array $\phi^{a,\downarrow}[]$ (a CSR-style length-$(|\mathcal{L}_j|{+}1)$ array whose $k$-th entry is the index of the first incoming arc of node $k$). For \emph{bottom-up} expansion: the symmetric arrays $b^{\uparrow}[]$, $\mathbf{v}^{\uparrow}[]$, and $\phi^{a,\uparrow}[]$ built from outgoing arcs. The per-node out-degree $\delta^{\text{out}}[]$ and in-degree $\delta^{\text{in}}[]$ are packed for the scoring heuristic. All arrays are transferred to GPU global memory, amortizing the packing cost across all layer expansions. Back in the main procedure of Algorithm~\ref{alg:gpu_bidir_pf}, the top-down frontier is initialized with $\mathcal{Y}^{\downarrow}(\mathbf{r}) = \{\mathbf{0}\}$ at the root and the bottom-up frontier with $\mathcal{Y}^{\uparrow}(\mathbf{t}) = \{\mathbf{0}\}$ at the terminal, both in GPU memory.
 
-% The dynamic layer selection loop executes on the CPU (in Algorithm~\ref{alg:gpu_coupled_pf}) because each expansion depends on the prior layer's filtered results. At each step, the algorithm compares the heuristic expansion scores $s_{\text{td}}$ and $s_{\text{bu}}$, selecting the direction with the lower score. The score of a layer is computed on the GPU as the total number of candidates that expanding it would generate---the sum over all nodes of the product of the current frontier size and the number of outgoing (top-down) or incoming (bottom-up) arcs. The bottom-up score is scaled by a $1.5\times$ factor to bias the scheme toward top-down expansion, reflecting the empirically higher cost of bottom-up label growth. Within each selected layer expansion, the subroutines \textsc{ExpandLayerTopDown} and \textsc{ExpandLayerBottomUp} in Algorithm~\ref{alg:gpu_coupled_pf} are executed. Both subroutines invoke the same sequence of four GPU passes, using their respective direction-specific packed arrays.
+% The dynamic layer selection loop executes on the CPU (in Algorithm~\ref{alg:gpu_bidir_pf}) because each expansion depends on the prior layer's filtered results. At each step, the algorithm compares the heuristic expansion scores $s_{\text{td}}$ and $s_{\text{bu}}$, selecting the direction with the lower score. The score of a layer is computed on the GPU as the total number of candidates that expanding it would generate---the sum over all nodes of the product of the current frontier size and the number of outgoing (top-down) or incoming (bottom-up) arcs. The bottom-up score is scaled by a $1.5\times$ factor to bias the scheme toward top-down expansion, reflecting the empirically higher cost of bottom-up label growth. Within each selected layer expansion, the subroutines \textsc{ExpandLayerTopDown} and \textsc{ExpandLayerBottomUp} in Algorithm~\ref{alg:gpu_bidir_pf} are executed. Both subroutines invoke the same sequence of four GPU passes, using their respective direction-specific packed arrays.
 
 % \textbf{Arc-level offset computation} (\Cref{alg:compute_arc_offsets}): for each arc $a = (u,v)$, one GPU thread reads the source node's frontier size $|\mathcal{Y}(u)|$, yielding a per-arc candidate count $\kappa_a$. An exclusive prefix sum over these counts produces per-arc buffer offsets $\phi^c_a$, which determine where each arc's candidates will be written in the flat buffer $\beta$. The per-destination-node candidate total $\Gamma_v$ is derived from the difference between the edge offsets of the last and first incoming arcs of $v$.
 
@@ -705,7 +586,7 @@ This execution model is well suited for workloads dominated by large numbers of 
 
 % \textbf{Survivor compaction} (\Cref{alg:compact_survivors}): the dominance filter produces a binary flag $\sigma_i \in \{0, 1\}$ for each candidate $i$, where $\sigma_i = 1$ indicates that candidate $i$ was not Pareto dominated. An exclusive prefix sum over these flags computes each survivor's compacted output position $\rho_i$. A final scatter pass writes only the survivors into the per-node label sets $\mathcal{Y}(v)$.
 
-% Once the two frontiers meet at the cutset layer $\mathcal{L}_c$, the final convolving and merging step is delegated to the GPU subroutine \Call{CutsetCoupling}{} (\Cref{alg:gpu_cutset_coupling}). This subroutine filters for active nodes $\mathcal{V}^*_c \subseteq \mathcal{L}_c$ that possess non-empty frontiers in both directions (line~1), since nodes lacking either cannot produce feasible complete paths. To maximize GPU execution efficiency and prevent warp divergence, the active nodes are sorted in descending order of their total frontier sizes $\text{score}(v) = \kappa^{\downarrow}_v + \kappa^{\uparrow}_v$. They are then processed in load-balanced, memory-bounded batches $\mathcal{B}$ s.t.\ the total number of Cartesian product candidates generated per batch does not exceed $B_{\max}$ (default 625,000).
+% Once the two frontiers meet at the cutset layer $\mathcal{L}_c$, the final convolving and merging step is delegated to the GPU subroutine \Call{CutsetCoupling}{} (\Cref{alg:gpu_cutset_merge}). This subroutine filters for active nodes $\mathcal{V}^*_c \subseteq \mathcal{L}_c$ that possess non-empty frontiers in both directions (line~1), since nodes lacking either cannot produce feasible complete paths. To maximize GPU execution efficiency and prevent warp divergence, the active nodes are sorted in descending order of their total frontier sizes $\text{score}(v) = \kappa^{\downarrow}_v + \kappa^{\uparrow}_v$. They are then processed in load-balanced, memory-bounded batches $\mathcal{B}$ s.t.\ the total number of Cartesian product candidates generated per batch does not exceed $B_{\max}$ (default 625,000).
 
 % For each batch $\mathcal{B}$, a custom GPU kernel materializes the Minkowski sum candidates $\beta$ (\Cref{alg:materialize_cutset_products}). Since convolving clean frontiers can generate redundant duplicates or dominated points, each batch undergoes a three-stage filtering pipeline on the GPU: (1)~filtering against the running global frontier $\mathcal{Y}^{\text{global}}$ (line~9) to prune candidates dominated by already found solutions, (2)~local self-pruning (line~11) using the 1D dominance filter to remove intra-batch dominated points, and (3)~mutual merging (line~13) which filters the running global frontier against the batch survivors, and then concatenates the remaining candidates.
 
@@ -751,6 +632,152 @@ This execution model is well suited for workloads dominated by large numbers of 
 % \State \Return $\mathcal{Y}^{\downarrow}(\mathbf{t})$ \Comment{$\mathbf{t}$ is the terminal node in $\mathcal{L}_{n+1}$}
 % \end{algorithmic}
 % \end{algorithm}
+
+\section{CPU Implementation}
+\label{app:cpu_implementation}
+
+\begin{algorithm}[htbp]
+\caption{CPU Tree Reduction for Cutset Frontiers}
+\label{alg:cpu_tree_reduction}
+\begin{algorithmic}[1]
+\Require Private cutset frontiers $\mathcal{P} = [\mathcal{P}_1,\dots,\mathcal{P}_q]$
+\Procedure{TreeReduce}{$\mathcal{P}$}
+    \While{$|\mathcal{P}| > 1$}
+        \State $\mathcal{Q} \gets [\,]$
+        \ForAll{$i = 1,3,5,\dots,2\lfloor |\mathcal{P}|/2 \rfloor - 1$ \textbf{in parallel}}
+            \State $\mathcal{Q}_{(i+1)/2} \gets \Call{FilterDominated}{\mathcal{P}_i \cup \mathcal{P}_{i+1}}$
+        \EndFor
+        \If{$|\mathcal{P}|$ is odd}
+            \State $\mathcal{Q}_{\lfloor |\mathcal{P}|/2 \rfloor + 1} \gets \mathcal{P}_{|\mathcal{P}|}$
+        \EndIf
+        \State $\mathcal{P} \gets \mathcal{Q}$
+    \EndWhile
+    \State \Return $\mathcal{P}_1$
+\EndProcedure
+\end{algorithmic}
+\end{algorithm}
+
+\section{GPU Implementation}
+\label{app:gpu_implementation}
+
+\begin{algorithm}[htbp]
+\caption{Compute Candidate Offsets}
+\label{alg:compute_arc_offsets}
+\begin{algorithmic}[1]
+\Require Frontier $\mathcal{Y}$; source-node array $b[]$; incoming-arc offsets $\phi^a[]$
+\Procedure{ComputeArcOffsets}{$\mathcal{Y}, b, \phi^a$}
+\State $M \gets |\mathcal{A}_{\mathcal{L}_j}|$ \Comment{Number of arcs in layer $j$}
+\ForAll{arcs $a = 0$ \textbf{to} $M-1$ \textbf{in parallel on GPU}} \Comment{One thread per arc}
+    \State $\kappa_a \gets |\mathcal{Y}(b(a))|$
+\EndFor
+\State $\phi^c_0 \gets 0$
+\For{$a = 1$ \textbf{to} $M$ \textbf{in parallel on GPU}}
+    \State $\phi^c_a \gets \phi^c_{a-1} + \kappa_{a-1}$
+\EndFor
+\ForAll{nodes $v \in \mathcal{L}_{j+1}$ \textbf{in parallel on GPU}}
+    \State $a_{\text{first}} \gets \phi^a_v$
+    \State $a_{\text{last}} \gets \phi^a_{v{+}1}$
+    \State $\Gamma_v \gets \phi^c_{a_{\text{last}}} - \phi^c_{a_{\text{first}}}$
+\EndFor
+\State \Return $\kappa, \phi^c, \Gamma$
+\EndProcedure
+\end{algorithmic}
+\end{algorithm}
+
+\begin{algorithm}[htbp]
+\caption{Materialize Layer Candidates}
+\label{alg:expand_candidates}
+\begin{algorithmic}[1]
+\Require Frontier $\mathcal{Y}$; source array $b[]$; arc weights $\mathbf{v}(\cdot)$; offsets $\phi^c[]$; counts $\kappa[]$
+\Procedure{ExpandCandidates}{$\mathcal{Y}, b, \mathbf{v}, \phi^c, \kappa$}
+\State Allocate flat buffer $\beta$ of size $\sum_a \kappa_a$
+\ForAll{arcs $a$ \textbf{in parallel on GPU}}
+    \State //~One warp (32 threads) per arc
+    \ForAll{$k = 0, 1, \dots, \kappa_a{-}1$ \textbf{distributed across warp threads}}
+        \State $\beta[\,\phi^c_a + k\,] \gets \mathcal{Y}(b(a))[k] + \mathbf{v}(a)$
+    \EndFor
+\EndFor
+\State \Return $\beta$
+\EndProcedure
+\end{algorithmic}
+\end{algorithm}
+
+\begin{algorithm}[htbp]
+\caption{Load-Balanced GPU Dominance Filter}
+\label{alg:dynamic_1D_kernel}
+\begin{algorithmic}[1]
+\Require Flat candidate buffer $\beta$; per-node candidate counts $\Gamma[]$; block size $B$
+\Procedure{FilterDominated}{$\beta, \Gamma$}
+\State $K[v] \gets \lceil \Gamma[v] / B \rceil$ for all $v$
+\State $\phi^k_0 \gets 0$
+\For{$v = 1$ \textbf{to} $|\mathcal{L}_{j+1}|$ \textbf{in parallel on GPU}}
+    \State $\phi^k_v \gets \phi^k_{v-1} + K[v-1]$
+\EndFor
+\State $\sigma_i \gets 1$ for all candidates $i$
+\ForAll{thread blocks $q = 0, \dots, \sum_v K[v] - 1$ \textbf{in parallel on GPU}}
+    \State Binary search $\phi^k$ to find node $v$ s.t.\ $\phi^k_v \le q < \phi^k_{v{+}1}$
+    \State $\tau \gets q - \phi^k_v$ \Comment{Tile index within node $v$}
+    \State $[b,\, e) \gets$ candidate range of node $v$ in $\beta$
+    \State $i \gets b + \tau \cdot B + \text{thread index within block}$
+    \State \textbf{Load} $\mathbf{y}_i \gets \beta[i]$ into per-thread register (if $i < e$) \Comment{Reused across tiles}
+    \State $\mathit{dominated} \gets \mathbf{false}$
+    \For{tile start $s = b$ \textbf{to} $e{-}1$, \textbf{step} $B$}
+        \State \textbf{Barrier}: wait for all threads in block
+        \State Each thread $k$ loads $\beta[s{+}k]$ into \textbf{shared memory} slot $k$ \;(if $s{+}k < e$)
+        \State \textbf{Barrier}: ensure tile is fully visible
+        \If{$i < e$ \textbf{and not} $\mathit{dominated}$}
+            \For{$j = 0$ \textbf{to} $\min(B,\, e{-}s){-}1$, \textbf{skip} $j = i{-}b{-}\tau B$}
+                \If{shared[$j$] $\prec \mathbf{y}_i$}\; $\mathit{dominated} \gets \mathbf{true}$; \textbf{break} \EndIf
+            \EndFor \Comment{Early exit within tile}
+        \EndIf
+        \If{$\mathit{dominated}$} \textbf{break} \EndIf \Comment{Early exit across tiles}
+    \EndFor
+    \If{$i < e$ \textbf{and} $\mathit{dominated}$}\; $\sigma_i \gets 0$ \EndIf
+\EndFor
+\State \Return $\sigma$
+\EndProcedure
+\end{algorithmic}
+\end{algorithm}
+
+\begin{algorithm}[htbp]
+\caption{Compact Node Frontiers}
+\label{alg:compact_survivors}
+\begin{algorithmic}[1]
+\Require Candidate buffer $\beta$ of size $S$; binary survivor flags $\sigma[]$
+\Procedure{CompactSurvivors}{$\beta, \sigma$}
+\State $\rho_0 \gets 0$
+\For{$i = 1$ \textbf{to} $S$} \Comment{Parallel prefix sum on GPU}
+    \State $\rho_i \gets \rho_{i-1} + \sigma_{i-1}$
+\EndFor
+\ForAll{candidates $i = 0$ \textbf{to} $S-1$ \textbf{in parallel on GPU}} \Comment{One thread per candidate}
+    \If{$\sigma_i = 1$}
+        \State $\mathcal{Y}(v)[\,\rho_i\,] \gets \beta[i]$ \Comment{$v$: destination node of $i$}
+    \EndIf
+\EndFor
+\State \Return $\mathcal{Y}$
+\EndProcedure
+\end{algorithmic}
+\end{algorithm}
+
+\begin{algorithm}[htbp]
+\caption{Materialize Cutset Products}
+\label{alg:materialize_cutset_products}
+\begin{algorithmic}[1]
+\Require Frontiers $\mathcal{Y}^{\downarrow}$, $\mathcal{Y}^{\uparrow}$; node offsets $\phi^{\downarrow}$, $\phi^{\uparrow}$ and sizes $\kappa^{\downarrow}$, $\kappa^{\uparrow}$ for nodes in batch $\mathcal{B}$; product offsets $\phi^p$
+\Procedure{MaterializeProducts}{$\mathcal{Y}^{\downarrow}, \mathcal{Y}^{\uparrow}, \mathcal{B}$}
+\State Allocate flat candidate buffer $\beta$ of size $\sum_{v \in \mathcal{B}} \kappa^{\downarrow}_v \cdot \kappa^{\uparrow}_v$
+\ForAll{nodes $v \in \mathcal{B}$ \textbf{in parallel on GPU}} \Comment{One thread block per node}
+    \State $T \gets \kappa^{\downarrow}_v \cdot \kappa^{\uparrow}_v$ \Comment{Total candidates for node $v$}
+    \ForAll{candidate indices $p = 0, \dots, T-1$ \textbf{in parallel}}
+        \State $i \gets \lfloor p / \kappa^{\uparrow}_v \rfloor$; \quad $j \gets p \pmod{\kappa^{\uparrow}_v}$
+        \State $y^{\downarrow} \gets \mathcal{Y}^{\downarrow}(\phi^{\downarrow}_v + i)$; \quad $y^{\uparrow} \gets \mathcal{Y}^{\uparrow}(\phi^{\uparrow}_v + j)$
+        \State $\beta[\,\phi^p_v + p\,] \gets y^{\downarrow} + y^{\uparrow}$
+    \EndFor
+\EndFor
+\State \Return $\beta$
+\EndProcedure
+\end{algorithmic}
+\end{algorithm}
 
 \section{Additional Experimental Results}
 
