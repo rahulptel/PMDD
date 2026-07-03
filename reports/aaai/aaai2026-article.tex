@@ -149,24 +149,6 @@ Let $\mathcal{X}_{\mathcal{D}} = \{ \mathbf{x}(p) \mid p \text{ is an } \mathbf{
 
 To extract this exact Pareto frontier $\mathcal{Y}_N$ from an exact decision diagram $\mathcal{D}$, we can employ the \emph{coupled enumeration scheme}, which dynamically interleaves top-down and bottom-up layer expansion, as detailed in \Cref{alg:coupled_pf}. This dynamic layer cutset methodology mitigates intermediate label explosion. Initially, a top-down layer pointer $i_{\text{td}}$ is set to layer 1 and a bottom-up pointer $i_{\text{bu}}$ is set to layer $n+1$. At each step, the scheme dynamically decides whether to expand the top-down frontier $\mathcal{Y}^{\downarrow}$ to layer $i_{\text{td}}+1$ or the bottom-up frontier $\mathcal{Y}^{\uparrow}$ to layer $i_{\text{bu}}-1$. This process continues until the two frontiers meet at a \emph{cutset} layer $c$ (i.e., $i_{\text{td}} = i_{\text{bu}}$). Finally, for each node $u \in \mathcal{L}_c$, the algorithm computes the convolution of its top-down and bottom-up labels (\Cref{alg:coupled_pf}, line 35), taking the pairwise sum of these vectors. The merging of these combined sets and the repeated application of a dominance filter produce the exact Pareto frontier $\mathcal{Y}_N$.
 
-% To maintain efficiency and prevent exponential growth of these label sets, a localized Pareto dominance filtering is performed at each node after a layer expansion (e.g. \Cref{alg:coupled_pf}, line 7 and 17). This localized filtering removes any vectors that are Pareto dominated by other vectors within the same set, ensuring that only nondominated partial paths are propagated forward. The dominance filtering operation requires pairwise comparisons among vectors in $\mathcal{Y}^{\downarrow}(v)$ and has worst-case complexity $\mathcal{O}(|\mathcal{Y}^{\downarrow}(v)|^2)$. This step is the key bottleneck in enumeration and consumes the most time.
-A special case of the coupled enumeration scheme is the \emph{top-down enumeration scheme}, in which the bottom-up layer pointer $i_{\text{bu}}$ is fixed to the layer $n+1$. As such, only operations involving `ExpandTopDown` are executed, and the cutset layer naturally occurs at $c = n+1$. In this case, upon completion of the final layer processing, the label set $\mathcal{Y}^{\downarrow}(\mathbf{t})$ at the terminal node directly corresponds to the exact Pareto frontier $\mathcal{Y}_N$. This approach is outlined in Algorithm~\ref{alg:top_down_pf}. Note that we did not perform convolution or repeated dominance filtering (\Cref{alg:coupled_pf}, lines 33 to 37) in this approach.
-
-\begin{algorithm}[htbp]
-\caption{Top-Down Pareto Frontier Enumeration}
-\label{alg:top_down_pf}
-\begin{algorithmic}[1]
-\Require Exact decision diagram $\mathcal{D} = (\mathcal{N}, \mathcal{A})$ with layers $\mathcal{L}_1, \dots, \mathcal{L}_{n+1}$
-\State $\mathcal{Y}^{\downarrow}(u) \gets \emptyset$ for all $u \in \mathcal{N}$
-\State $\mathcal{Y}^{\downarrow}(\mathbf{r}) \gets \{\mathbf{0}\}$ \Comment{$\mathbf{r}$ is the root node in $\mathcal{L}_1$, $\mathbf{0} \in \mathbb{R}^m$}
-\For{$j = 1$ \textbf{to} $n$}
-    \State \Call{ExpandTopDown}{$j, \mathcal{Y}^{\downarrow}$}
-\EndFor
-\State \Return $\mathcal{Y}^{\downarrow}(\mathbf{t})$ \Comment{$\mathbf{t}$ is the terminal node in $\mathcal{L}_{n+1}$}
-\end{algorithmic}
-\end{algorithm}
-
-
 \subsection{Graphics Processing Unit}
 \label{sec:prelim_gpu}
 
@@ -534,16 +516,16 @@ For each batch $\mathcal{B}$, a custom GPU kernel materializes the Minkowski sum
 \section{Parallel Decision Diagram-based Pareto Frontier Enumeration (Rewritten Draft)}
 \label{sec:method_rewrite}
 
-This section describes how we parallelize exact Pareto frontier enumeration on a decision diagram (DD). We use the top-down and coupled enumeration schemes described in \Cref{alg:top_down_pf,alg:coupled_pf}; in particular, the dynamic choice between top-down and bottom-up expansion in the coupled scheme follows the serial enumeration method. Our contribution is the parallel execution of the expensive primitives that arise inside these schemes: candidate generation, dominance filtering, cutset coupling, and frontier merging.
+This section describes how we parallelize exact Pareto frontier enumeration on a decision diagram (DD), following the dynamic layer cutset scheme in \Cref{alg:coupled_pf}. The rule that chooses which side of the cutset to expand is inherited from the serial enumeration method. Our contribution is the parallel execution of the expensive primitives inside the enumeration: candidate generation, dominance filtering, cutset coupling, and frontier merging.
 
 \subsection{Parallel Work Primitives}
 \label{sec:parallel_primitives_rewrite}
 
-The enumeration algorithms maintain partial Pareto frontiers at DD nodes. In a top-down expansion, labels are propagated from layer $\mathcal{L}_j$ to $\mathcal{L}_{j+1}$ along outgoing arcs. In a bottom-up expansion, labels are propagated in the reverse direction. In both cases, expanding a layer has two phases. First, candidate labels are generated by shifting an existing node frontier by an arc weight. Second, candidates assigned to the same destination node are filtered by Pareto dominance.
+The enumeration maintains partial Pareto frontiers at DD nodes from both sides of the diagram. A root-side expansion propagates labels from layer $\mathcal{L}_j$ to $\mathcal{L}_{j+1}$ along outgoing arcs. A terminal-side expansion propagates labels in the reverse direction. In both cases, expanding a layer has two phases. First, candidate labels are generated by shifting an existing node frontier by an arc weight. Second, candidates assigned to the same destination node are filtered by Pareto dominance.
 
 These phases expose several forms of parallelism. The coarsest is \emph{node-level parallelism}: different nodes in the same layer can be processed independently once the previous layer has been finalized. This is attractive on CPUs because it gives each worker ownership of a node frontier and avoids synchronization on shared label sets. A finer granularity is \emph{arc- and label-level parallelism}: each candidate produced by an arc-frontier pair can be materialized independently, provided that the implementation assigns it a disjoint output location. The dominance test exposes still finer \emph{comparison-level parallelism}, since each candidate can be compared with many other candidates in the same node-local set.
 
-The coupled algorithm adds a fourth primitive at the cutset layer. Once the top-down and bottom-up frontiers meet at layer $\mathcal{L}_c$, each cutset node $u$ contributes the product set
+The cutset layer introduces a fourth primitive. Once the root-side and terminal-side frontiers meet at layer $\mathcal{L}_c$, each cutset node $u$ contributes the product set
 \[
     \mathcal{Y}^{\downarrow}(u) \oplus \mathcal{Y}^{\uparrow}(u)
     =
@@ -561,7 +543,7 @@ The CPU implementation uses node-level parallelism for layer expansion. For a se
 
 This design is simple and effective when work is reasonably spread across the nodes of a layer. It also handles irregular layers better than static scheduling because workers that finish small frontiers can take additional nodes. Its limitation is that a single very large node frontier remains serial within one worker. The CPU implementation does not split the dominance filtering of one node across many workers; doing so would require either synchronization on the node frontier or an additional materialization and reduction scheme.
 
-For coupled enumeration, the CPU also parallelizes the cutset. Each worker processes a subset of cutset nodes and builds a private partial frontier from the products $\mathcal{Y}^{\downarrow}(u) \oplus \mathcal{Y}^{\uparrow}(u)$. These private frontiers are then merged by a pairwise tree reduction until one frontier remains. This reduction exposes parallelism in the global merge while preserving thread-local frontier updates within each partial merge.
+The CPU also parallelizes the cutset phase. Each worker processes a subset of cutset nodes and builds a private partial frontier from the products $\mathcal{Y}^{\downarrow}(u) \oplus \mathcal{Y}^{\uparrow}(u)$. These private frontiers are then merged by a pairwise tree reduction until one frontier remains. This reduction exposes parallelism in the global merge while preserving thread-local frontier updates within each partial merge.
 
 \subsection{GPU Implementation}
 \label{sec:gpu_impl_rewrite}
@@ -572,9 +554,28 @@ Each GPU layer expansion is organized as four passes. First, a counting pass com
 
 This layout also provides load balancing. Nodes with few candidates receive little GPU work, while nodes with many candidates receive more blocks during dominance filtering. When a layer would produce too many candidates at once, the implementation processes node ranges in memory-bounded batches. The same expansion and filtering passes are applied to each batch, and the survivors are appended to the next frontier representation.
 
-The GPU cutset step follows the same principle but uses a different primitive. Active cutset nodes are those with nonempty top-down and bottom-up frontiers. These nodes are sorted by a size score and partitioned into batches whose Cartesian-product size is bounded. For each batch, a kernel materializes all sums $\mathbf{y}^{\downarrow}+\mathbf{y}^{\uparrow}$ for the nodes in the batch. The batch is then filtered against the current global frontier, self-pruned by dominance filtering, and merged into the global frontier by mutually removing dominated points. Thus, unlike the CPU implementation, the GPU cutset merge is implemented as a batched running-frontier merge rather than a tree reduction over thread-local partial frontiers.
+The GPU cutset step follows the same principle but uses a different primitive. Active cutset nodes are those with nonempty root-side and terminal-side frontiers. These nodes are sorted by a size score and partitioned into batches whose Cartesian-product size is bounded. For each batch, a kernel materializes all sums $\mathbf{y}^{\downarrow}+\mathbf{y}^{\uparrow}$ for the nodes in the batch. The batch is then filtered against the current global frontier, self-pruned by dominance filtering, and merged into the global frontier by mutually removing dominated points. Thus, unlike the CPU implementation, the GPU cutset merge is implemented as a batched running-frontier merge rather than a tree reduction over thread-local partial frontiers.
 
-The top-down GPU variant is obtained by removing the bottom-up state and the cutset-coupling step. It repeatedly applies the top-down layer-expansion passes until the terminal layer is reached, at which point the terminal frontier is the complete Pareto frontier.
+\appendix
+
+\section{Top-Down Enumeration Variant}
+\label{app:top_down_variant}
+
+A one-sided enumeration variant fixes the terminal-side layer pointer at $\mathcal{L}_{n+1}$ and expands only from the root side, as shown in \Cref{alg:top_down_pf}. The cutset is then the terminal layer, and the terminal label set is the Pareto frontier.
+
+\begin{algorithm}[htbp]
+\caption{Top-Down Pareto Frontier Enumeration}
+\label{alg:top_down_pf}
+\begin{algorithmic}[1]
+\Require Exact decision diagram $\mathcal{D} = (\mathcal{N}, \mathcal{A})$ with layers $\mathcal{L}_1, \dots, \mathcal{L}_{n+1}$
+\State $\mathcal{Y}^{\downarrow}(u) \gets \emptyset$ for all $u \in \mathcal{N}$
+\State $\mathcal{Y}^{\downarrow}(\mathbf{r}) \gets \{\mathbf{0}\}$ \Comment{$\mathbf{r}$ is the root node in $\mathcal{L}_1$, $\mathbf{0} \in \mathbb{R}^m$}
+\For{$j = 1$ \textbf{to} $n$}
+    \State \Call{ExpandTopDown}{$j, \mathcal{Y}^{\downarrow}$}
+\EndFor
+\State \Return $\mathcal{Y}^{\downarrow}(\mathbf{t})$ \Comment{$\mathbf{t}$ is the terminal node in $\mathcal{L}_{n+1}$}
+\end{algorithmic}
+\end{algorithm}
 
 \bibliography{references}
 
