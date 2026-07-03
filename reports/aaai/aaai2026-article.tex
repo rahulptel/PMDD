@@ -26,7 +26,7 @@
 \usepackage{tikz}
 \usepackage[capitalize,noabbrev]{cleveref}
 \usetikzlibrary{positioning, fit, backgrounds, calc, decorations.pathreplacing}
-
+\usepackage{multirow}
 
 % \title{Parallel Decision Diagrams-based Multiobjective Discrete Optimization} %TODO Please add
 \title{Parallel Decision Diagram-based Multiobjective Discrete Optimization} %TODO Please add
@@ -34,11 +34,11 @@
 % \title{\method{}: GPU-Accelerated Multiobjective Discrete Optimization using Decision Diagrams} %TODO Please add
 
 \author{
-Rahul Patel\textsuperscript{\rm 1},
-Elias B. Khalil\textsuperscript{\rm 1}
+Rahul Patel\textsuperscript{},
+Elias B. Khalil\textsuperscript{}
 }
 \affiliations{
-\textsuperscript{\rm 1}Department of Mechanical and Industrial Engineering, University of Toronto, Canada\\
+Department of Mechanical and Industrial Engineering, University of Toronto, Canada\\
 rm.patel@mail.utoronto.ca, elias.khalil@utoronto.ca
 }
 
@@ -76,7 +76,7 @@ The main contributions of this paper are summarized as follows:
     \item We demonstrate that our parallelization schemes achieve substantial reductions in wall-clock time compared to the state-of-the-art serial enumeration baseline, achieving speedups of up to X$\times$ on CPUs and Y$\times$ on GPUs.
 \end{itemize}
 
-The remainder of this paper is organized as follows. \Cref{sec:prelim} provides the necessary background on MODO, DDs, and GPU architecture. \Cref{sec:method} details our parallel enumeration methodology and resource allocation schemes. \Cref{sec:results} presents the computational evaluation across various problem classes. The related work is provided in \Cref{sec:related}. Finally, \Cref{sec:conclusion} concludes the paper and discusses avenues for future work.
+The remainder of this paper is organized as follows. \Cref{sec:prelim} provides the necessary background on MODO and DDs. \Cref{sec:method} details our parallel enumeration methodology and resource allocation schemes. \Cref{sec:results} presents the computational evaluation across various problem classes. The related work is provided in \Cref{sec:related}. Finally, \Cref{sec:conclusion} concludes the paper and discusses avenues for future work.
 
 \section{Preliminaries}
 \label{sec:prelim}
@@ -87,20 +87,7 @@ An objective vector $\mathbf{y}^\star = \mathbf{f}(\mathbf{x}^\star)$ associated
 {Pareto frontier} (or nondominated frontier) of the MODO problem. Mathematically, this frontier is expressed as $\mathcal{Y}_N = \{\mathbf{f}(\mathbf{x}) \mid \mathbf{x} \in \mathcal{X}, \nexists \, \mathbf{x}' \in \mathcal{X} \text{ such that } \mathbf{f}(\mathbf{x}') \prec \mathbf{f}(\mathbf{x})\}$. The fundamental aim in exact multiobjective optimization is to completely enumerate this Pareto frontier, providing decision-makers with the exact trade-offs among the competing criteria.
 
 
-\subsection{Decision Diagrams for Multiobjective Discrete Optimization}
-\label{sec:prelim_dd}
-
-
-A DD is a directed layered acyclic graph $\mathcal{D} = (\mathcal{N}, \mathcal{A})$ defined by a node set $\mathcal{N}$ and an arc set $\mathcal{A}$. The node set is partitioned into $n+1$ strictly sequential layers, $\mathcal{N} = \mathcal{L}_1 \cup \dots \cup \mathcal{L}_{n+1}$, corresponding to the sequence of the $n$ decision variables. The first layer $\mathcal{L}_1$ contains only the \emph{root node} $\mathbf{r}$, and the final layer $\mathcal{L}_{n+1}$ contains only the \emph{terminal node} $\mathbf{t}$.
-
-The arcs in $\mathcal{A}$ are directed from nodes in layer $\mathcal{L}_j$ to nodes in layer $\mathcal{L}_{j+1}$ for $j \in \{1, \dots, n\}$. Every arc $a \in \mathcal{A}$ originating from layer $\mathcal{L}_j$ possesses two key attributes: an \emph{assignment value} $d(a) \in \mathbb{Z}$, which dictates the value assigned to the decision variable $x_j$, and an \emph{objective weight} $\mathbf{v}(a) \in \mathbb{R}^m$, which represents the transition's contribution to the $m$-dimensional objective function. A path $p = (a_1, \dots, a_n)$ from the root $\mathbf{r}$ to the terminal node $\mathbf{t}$ encodes a complete decision vector $\mathbf{x}(p) = (d(a_1), \dots, d(a_n))^\top \in \mathbb{Z}^n$, with an associated objective vector obtained by accumulating the arc weights along the path $\mathbf{v}(p) = \sum_{i=1}^n \mathbf{v}(a_i)$.
-
-
-Let $\mathcal{X}_{\mathcal{D}} = \{ \mathbf{x}(p) \mid p \text{ is an } \mathbf{r}-\mathbf{t} \text{ path in } \mathcal{D} \}$ denote the set of solutions encoded by the diagram. A DD is said to be \emph{exact} for a given problem if it represents the feasible region ($\mathcal{X}_{\mathcal{D}} = \mathcal{X}$) and the path evaluations correctly compute the objective function ($\mathbf{v}(p) = \mathbf{f}(\mathbf{x}(p))$ for all paths). In this case, the image of the encoded solutions in the objective space is $\mathcal{Y}_{\mathcal{D}} = \{ \mathbf{v}(p) \mid p \text{ is an } \mathbf{r}\text{-to-}\mathbf{t} \text{ path} \}$. The nondominated vectors extracted from $\mathcal{Y}_{\mathcal{D}}$ constitute the exact Pareto frontier $\mathcal{Y}_N$ of the original MODO problem.
-
-During enumeration, each DD node stores a \emph{node frontier}: a nondominated set of objective vectors associated with partial paths through that node. In the root-side direction, $\mathcal{Y}^{\downarrow}(u)$ denotes the node frontier of partial paths from the root $\mathbf{r}$ to node $u$; in the terminal-side direction, $\mathcal{Y}^{\uparrow}(u)$ denotes the node frontier of partial paths from $u$ to the terminal $\mathbf{t}$. Individual objective vectors in a node frontier are called \emph{labels}. Newly generated, unfiltered labels are called \emph{candidate labels}. During cutset merging, a \emph{global frontier} denotes a running nondominated set over complete root-to-terminal labels. We reserve \emph{Pareto frontier} for the final nondominated set $\mathcal{Y}_N$.
-
-\begin{algorithm}[tbp!]
+\begin{algorithm}[t!]
 \caption{Coupled Pareto Frontier Enumeration}
 \label{alg:coupled_pf}
 \begin{algorithmic}[1]
@@ -148,103 +135,21 @@ During enumeration, each DD node stores a \emph{node frontier}: a nondominated s
 \State \Return $\mathcal{Y}_N$
 \end{algorithmic}
 \end{algorithm}
+\subsection{Decision Diagrams for Multiobjective Discrete Optimization}
+\label{sec:prelim_dd}
+
+
+A DD is a directed layered acyclic graph $\mathcal{D} = (\mathcal{N}, \mathcal{A})$ defined by a node set $\mathcal{N}$ and an arc set $\mathcal{A}$. The node set is partitioned into $n+1$ strictly sequential layers, $\mathcal{N} = \mathcal{L}_1 \cup \dots \cup \mathcal{L}_{n+1}$, corresponding to the sequence of the $n$ decision variables. The first layer $\mathcal{L}_1$ contains only the \emph{root node} $\mathbf{r}$, and the final layer $\mathcal{L}_{n+1}$ contains only the \emph{terminal node} $\mathbf{t}$.
+
+The arcs in $\mathcal{A}$ are directed from nodes in layer $\mathcal{L}_j$ to nodes in layer $\mathcal{L}_{j+1}$ for $j \in \{1, \dots, n\}$. Every arc $a \in \mathcal{A}$ originating from layer $\mathcal{L}_j$ possesses two key attributes: an \emph{assignment value} $d(a) \in \mathbb{Z}$, which dictates the value assigned to the decision variable $x_j$, and an \emph{objective weight} $\mathbf{v}(a) \in \mathbb{R}^m$, which represents the transition's contribution to the $m$-dimensional objective function. A path $p = (a_1, \dots, a_n)$ from the root $\mathbf{r}$ to the terminal node $\mathbf{t}$ encodes a complete decision vector $\mathbf{x}(p) = (d(a_1), \dots, d(a_n))^\top \in \mathbb{Z}^n$, with an associated objective vector obtained by accumulating the arc weights along the path $\mathbf{v}(p) = \sum_{i=1}^n \mathbf{v}(a_i)$.
+
+
+Let $\mathcal{X}_{\mathcal{D}} = \{ \mathbf{x}(p) \mid p \text{ is an } \mathbf{r}-\mathbf{t} \text{ path in } \mathcal{D} \}$ denote the set of solutions encoded by the diagram. A DD is said to be \emph{exact} for a given problem if it represents the feasible region ($\mathcal{X}_{\mathcal{D}} = \mathcal{X}$) and the path evaluations correctly compute the objective function ($\mathbf{v}(p) = \mathbf{f}(\mathbf{x}(p))$ for all paths). In this case, the image of the encoded solutions in the objective space is $\mathcal{Y}_{\mathcal{D}} = \{ \mathbf{v}(p) \mid p \text{ is an } \mathbf{r}\text{-to-}\mathbf{t} \text{ path} \}$. The nondominated vectors extracted from $\mathcal{Y}_{\mathcal{D}}$ constitute the exact Pareto frontier $\mathcal{Y}_N$ of the original MODO problem.
+
+During enumeration, each DD node stores a \emph{node frontier}: a nondominated set of objective vectors associated with partial paths through that node. In the root-side direction, $\mathcal{Y}^{\downarrow}(u)$ denotes the node frontier of partial paths from the root $\mathbf{r}$ to node $u$; in the terminal-side direction, $\mathcal{Y}^{\uparrow}(u)$ denotes the node frontier of partial paths from $u$ to the terminal $\mathbf{t}$. Individual objective vectors in a node frontier are called \emph{labels}. Newly generated, unfiltered labels are called \emph{candidate labels}. During cutset merging, a \emph{global frontier} denotes a running nondominated set over complete root-to-terminal labels. We reserve \emph{Pareto frontier} for the final nondominated set $\mathcal{Y}_N$.
+
 
 To extract this exact Pareto frontier $\mathcal{Y}_N$ from an exact decision diagram $\mathcal{D}$, we can employ the \emph{coupled enumeration scheme}, which dynamically interleaves root-side and terminal-side layer expansion, as detailed in \Cref{alg:coupled_pf}. This dynamic layer cutset methodology mitigates intermediate node-frontier growth. Initially, a root-side layer pointer $i_{\text{td}}$ is set to layer 1 and a terminal-side pointer $i_{\text{bu}}$ is set to layer $n+1$. At each step, the scheme dynamically decides whether to expand the root-side node frontiers $\mathcal{Y}^{\downarrow}$ to layer $i_{\text{td}}+1$ or the terminal-side node frontiers $\mathcal{Y}^{\uparrow}$ to layer $i_{\text{bu}}-1$. This process continues until the two directions meet at a \emph{cutset} layer $c$ (i.e., $i_{\text{td}} = i_{\text{bu}}$). Finally, for each node $u \in \mathcal{L}_c$, the algorithm computes the pairwise sums of labels in its root-side and terminal-side node frontiers (\Cref{alg:coupled_pf}, line 35). The merging of these combined sets and the repeated application of a dominance filter produce the exact Pareto frontier $\mathcal{Y}_N$.
-
-\subsection{Graphics Processing Unit}
-\label{sec:prelim_gpu}
-
-GPUs are throughput-oriented processors that achieve high performance by executing many lightweight threads in parallel. In contrast, CPUs comprise a small number of complex cores optimized for low-latency execution and sophisticated control flow. This architectural difference makes GPUs particularly effective for data-parallel workloads in which the same operation is applied independently across many inputs \cite{lindholm2008nvidia}.
-\Cref{fig:gpu_arch} illustrates the GPU execution and memory hierarchy. Computation is launched as a \emph{kernel}, which executes as a large collection of \emph{threads}. Threads are grouped into \emph{thread blocks}, and all blocks in a kernel launch form a \emph{grid} \cite{nickolls2008scalable}. The GPU schedules thread blocks onto \emph{Streaming Multiprocessors} (SMs), where each SM can host multiple blocks concurrently and executes threads in a \emph{Single Instruction Multiple Thread} (SIMT) manner, where threads follow the same instruction stream while operating on different data.
-
-
-\begin{figure}[tbp]
-    \centering
-    \resizebox{0.5\linewidth}{!}{
-    \begin{tikzpicture}[
-        sm/.style={draw, thick, fill=blue!5, rounded corners, minimum width=3.8cm, minimum height=3.8cm},
-        block/.style={draw, dashed, thick, fill=blue!10, rounded corners, inner sep=3pt},
-        thread/.style={draw, fill=green!40, minimum width=0.25cm, minimum height=0.25cm, inner sep=0pt},
-        mem/.style={draw, thick, fill=orange!20, minimum width=3.2cm, minimum height=0.6cm, align=center},
-        l2/.style={draw, thick, fill=orange!25, minimum width=9cm, minimum height=0.7cm, align=center},
-        gmem/.style={draw, ultra thick, fill=orange!30, minimum width=9cm, minimum height=0.7cm, align=center},
-        device/.style={draw, ultra thick, fill=gray!10, rounded corners, inner sep=15pt}
-    ]
-
-    % SM 1
-    \node[sm] (sm1) at (0,0) {};
-    \node[anchor=north, font=\bfseries, yshift=-0.1cm] at (sm1.north) {SM 1};
-    \node[mem, anchor=north, yshift=-0.7cm] (smem1) at (sm1.north) {Shared Mem / L1};
-
-    % SM 1 - Block 1
-    \node[block, minimum width=1.3cm, minimum height=1.3cm] (s1b1) at ($(sm1.center) + (-0.7, -0.4)$) {};
-    \node[font=\small, anchor=north, yshift=-0.05cm] at (s1b1.south) {Block};
-    \foreach \i/\x in {1/-0.3, 2/0, 3/0.3} {
-        \foreach \j/\y in {1/0.3, 2/0, 3/-0.3} {
-            \node[thread] (s1b1t\i\j) at ($(s1b1.center) + (\x, \y)$) {};
-        }
-    }
-
-    % SM 1 - Multiple Blocks Dots
-    \node[font=\Large] at ($(sm1.center) + (0.9, -0.4)$) {\dots};
-
-    % Explicit annotation for Threads
-    \draw[<-, thick] (s1b1t33.east) -- ++(0.5, 0) node[right, font=\small, inner sep=1pt] {Thread};
-
-    % Dots indicating more SMs
-    \node[right=0.25cm of sm1, font=\huge] (dots) {\dots};
-
-    % SM N
-    \node[sm, right=0.25cm of dots] (smn) {};
-    \node[anchor=north, font=\bfseries, yshift=-0.1cm] at (smn.north) {SM $N$};
-    \node[mem, anchor=north, yshift=-0.7cm] (smemn) at (smn.north) {Shared Mem / L1};
-
-    % SM N - Block 1
-    \node[block, minimum width=1.3cm, minimum height=1.3cm] (snb1) at ($(smn.center) + (-0.7, -0.4)$) {};
-    \node[font=\small, anchor=north, yshift=-0.05cm] at (snb1.south) {Block};
-    \foreach \i/\x in {1/-0.3, 2/0, 3/0.3} {
-        \foreach \j/\y in {1/0.3, 2/0, 3/-0.3} {
-            \node[thread] (snb1t\i\j) at ($(snb1.center) + (\x, \y)$) {};
-        }
-    }
-
-    % SM N - Multiple Blocks Dots
-    \node[font=\Large] at ($(smn.center) + (0.9, -0.4)$) {\dots};
-
-    % Logical Grid Brace
-    \draw[decorate, decoration={brace, amplitude=10pt}, ultra thick, purple!80!black]
-        ([yshift=0.2cm]sm1.north west) -- ([yshift=0.2cm]smn.north east)
-        node[midway, above=12pt, font=\bfseries, purple!80!black] {Grid (Logical Collection of Thread Blocks)};
-
-    % L2 Cache (Centered between SM1 and SMN)
-    \node[l2, anchor=north] (l2cache) at ($(sm1.south)!0.5!(smn.south) + (0, -0.8cm)$) {\textbf{L2 Cache}};
-
-    % Global Memory
-    \node[gmem, below=0.8cm of l2cache] (globalmem) {\textbf{Global Memory (DRAM)}};
-
-    % Connections
-    \draw[<->, thick] (sm1.south) -- (sm1.south |- l2cache.north);
-    \draw[<->, thick] (smn.south) -- (smn.south |- l2cache.north);
-    \draw[<->, ultra thick] (l2cache.south) -- (globalmem.north);
-
-    % Device Background Layer
-    \begin{scope}[on background layer]
-        % Add a hidden coordinate to push the top border up slightly for the label and brace
-        \coordinate (topleft) at ([xshift=-0.2cm, yshift=1.6cm]sm1.north west);
-        \node[device, fit=(topleft) (smn) (globalmem)] (gpu) {};
-        \node[anchor=north west, font=\Large\bfseries] at (gpu.north west) {GPU Device};
-    \end{scope}
-
-    \end{tikzpicture}}
-    \caption{Schematic representation of a GPU architecture.}
-    \label{fig:gpu_arch}
-\end{figure}
-The memory system is also hierarchical. Threads within an SM have access to fast on-chip storage, including registers and shared memory, which enables efficient intra-block cooperation and synchronization. SMs connect to a larger, device-wide cache (L2) and ultimately to high-capacity but high-latency global memory (DRAM). Effective GPU implementations therefore aim to expose ample parallelism while limiting expensive global-memory traffic \cite{nickolls2010gpu}.
-This execution model is well suited for workloads dominated by large numbers of independent arithmetic operations and comparisons. In particular, pairwise dominance checks required during PF enumeration in Algorithm~\ref{alg:coupled_pf} are natural candidates for GPU acceleration.
-
-
-
-
 
 \section{Parallel Decision Diagram-based Pareto Frontier Enumeration}
 \label{sec:method}
@@ -284,7 +189,7 @@ The CPU also parallelizes the cutset products in lines~31--33. Each worker proce
 
 The GPU implementation follows the same enumeration logic as Algorithm~\ref{alg:coupled_pf}, but changes the unit of work. Rather than assigning one worker to own a node frontier, it materializes candidate labels in flat buffers and then applies data-parallel filtering and compaction kernels. The high-level procedure is shown in \Cref{alg:gpu_coupled_pf}: the DD is first flattened, each selected layer expansion invokes the same four-kernel pipeline, and the cutset phase is handled by a separate batched coupling routine.
 
-\begin{algorithm}[tbp!]
+\begin{algorithm}[t!]
 \caption{GPU-Accelerated Coupled Pareto Frontier Enumeration}
 \label{alg:gpu_coupled_pf}
 \begin{algorithmic}[1]
@@ -508,103 +413,507 @@ Batching does not change the set being computed. After each batch is processed, 
 \end{algorithmic}
 \end{algorithm}
 
+\section{Computational Experiments}
+Our computational evaluation aims to answer the following key research questions:
+\begin{list}{\textbf{RQ\arabic{enumi}}}{%
+    \usecounter{enumi}
+    \setlength{\labelwidth}{2.5em}
+    \setlength{\labelsep}{0.5em}
+    \setlength{\leftmargin}{3.0em}
+    \setlength{\itemsep}{0.25em}
+    \setlength{\parsep}{0pt}
+}
+    \item \textbf{MIP vs. Serial DD:} How does serial DD-based Pareto frontier enumeration compare with MIP baselines in runtime and scalability?
+    \item \textbf{Serial DD vs. Parallel DD on CPU:} How much speedup does the parallel CPU DD implementation provide over serial DD?
+    \item \textbf{Parallel DD on CPU vs. GPU:} How does the GPU DD implementation compare with the parallel CPU DD variant in runtime and robustness?
+\end{list}
 
+\subsection{Experimental Setup}
+We conducted all experiments on a compute cluster equipped with an Intel Xeon 6972P CPU running at 2.4\,GHz and an NVIDIA H100 GPU. Across all experiments, the CPU memory limit was set to 16\,GB and the GPU memory limit was set to 20\,GB, with a one-hour time limit per instance. Our parallel PF enumeration algorithms were implemented on top of the C++ code of \citet{bergman2022network}. Specifically, we used C++14 with OpenMP 4.5 for CPU parallelism and NVCC 12.6 for GPU acceleration.
 
+We evaluate the proposed methods on MOKP, MOSPP, and MOTSP. The test instances are taken from \citet{bergman2022network}. We report results for instance sizes on which their best method, namely coupled enumeration (\texttt{Coup} or \texttt{Coup}$^+$), required at least 5 seconds of total runtime. For each instance size, the test set contains 10 instances.
+
+We compare our approach against the serial coupled enumeration method of \citet{bergman2022network}, denoted by \text{Coup} or \text{Coup}$^+$. The ``+'' suffix indicates that state-dominance-based label pruning is used in addition to coupled enumeration. To ensure a fair comparison, we use the implementation provided by \citet{bergman2022network}, rather than our modified implementation, which can also perform serial PF enumeration. We further compare against the defining point algorithm (DPA) proposed in \citet{dachert2024simple}, which, to the best of our knowledge, is a state-of-the-art MIP-based approach for multiobjective discrete optimization with support for more than two objectives. We refer to the two variants of this algorithm as DPA-A and DPA-TS.
+
+Our CPU-based parallel variants are referred to as \texttt{Coup-T} (or $\texttt{Coup}^+\texttt{-T}$), where \texttt{T} specifies the number of parallel threads. The GPU variants are called $\texttt{G-Coup}$ or $\texttt{G-Coup}^{+}$. he corresponding GPU variants are denoted by \texttt{G-Coup} and \texttt{G-Coup}$^+$. We report the enumeration wall-clock time in seconds (``Time (s)''), the speed-up w.r.t. the Coup or Coup+ and the tuple ``(M, T)'' reports the number of instances that failed due to out-of-memory errors (M) and time-out limits (T).
+
+\subsection{Results}
+\paragraph{RQ1 (MIP vs. Serial DD).}
+\Cref{tab:mokp_result_short,tab:motsp_result_short} show that serial DD enumeration is substantially more robust than the DPA baselines on MOKP and MOTSP. On MOKP, DPA solves only two instances for $(N,K)=(40,6)$ and none of the remaining reported settings, whereas \texttt{Coup} solves all instances for $N=40$ and remains competitive on the larger $N=70$ settings. On MOTSP, both DPA variants time out on all reported settings, while \texttt{Coup} solves all instances for $K=4,5$, nine instances for $K=6$, and one instance for $K=7$. The MOSPP results in \Cref{tab:mospp_result_short} are more mixed: DPA-A is faster than \texttt{Coup} for $(150,3)$ and $(200,3)$, and solves all instances where \texttt{Coup} encounters memory failures for $N=200$; however, DPA fails on the high-objective $(150,7)$ setting where \texttt{Coup} solves all instances.
+
+\paragraph{RQ2 (Serial DD vs. Parallel DD on CPU).}
+The CPU variants provide consistent but bounded speedups over serial DD enumeration. On MOKP, the best CPU speedups range from $1.80\times$ to $3.21\times$, with weaker scaling on the larger $N=70$ cases. On MOSPP, CPU speedups range from about $1.51\times$ on the easiest setting to $4.12\times$ for $(200,4)$. MOTSP benefits most from CPU parallelism: \texttt{Coup-16} reaches $7.83\times$ for $K=4$ and $5.05\times$ for $K=5$, while still improving over serial enumeration for $K=6,7$. The CPU variants also improve robustness in several harder settings, solving more instances than serial \texttt{Coup} on large MOKP and MOTSP cases.
+
+\paragraph{RQ3 (Parallel DD on CPU vs. GPU).}
+The GPU variants are often fastest when the intermediate frontiers fit in GPU memory, but they are less robust than the CPU variants. On MOKP, GPU methods dominate the small $N=40$ settings, with \texttt{G-Coup} reaching $5.51\times$ and $9.71\times$ speedups; for $N=70$, \texttt{G-TD} is fastest on solved instances but incurs GPU out-of-memory failures. On MOSPP, GPU performance is strong for $N=150$, including a $20.88\times$ speedup for \texttt{G-TD} at $(150,7)$, but both GPU variants fail due to memory on the reported $N=200$ settings. On MOTSP, GPU methods are competitive with or faster than the CPU variants, especially for $K=5,6$, but memory failures appear for \texttt{G-TD} at higher $K$ and for \texttt{G-Coup} at $K=7$. Overall, the GPU gives the largest speedups, while the parallel CPU variants are more reliable under the imposed memory limits.
+
+\begin{table*}[t]
+\centering
+\scriptsize
+\caption{MOKP Pareto Enumeration Runtime Comparison Across Enumeration Methods}
+\resizebox{0.7\textwidth}{!}{%
+\begin{tabular}{rrlrrl|rrlrrl}
+\toprule
+N & K & Method & Time (S) & Speed-up & $S^{(M,T)}$ & N & K & Method & Time (S) & Speed-up & $S^{(M,T)}$ \\
+\midrule
+\multirow{8}{*}{40} & \multirow{8}{*}{6} & DPA-TS & 1371 & 0.01$\times$ & $2^{(0, 8)}$ & \multirow{8}{*}{40} & \multirow{8}{*}{7} & DPA-TS & -- & -- & $0^{(0, 10)}$ \\
+ &  & DPA-A & 1439 & 0.01$\times$ & $2^{(0, 8)}$ &  &  & DPA-A & -- & -- & $0^{(0, 10)}$ \\
+ &  & Coup & 10 & 1.00$\times$ & $10$ &  &  & Coup & 33 & 1.00$\times$ & $10$ \\
+ &  & \texttt{Coup-4} & 6 & 1.87$\times$ & $10$ &  &  & \texttt{Coup-4} & 16 & 2.12$\times$ & $10$ \\
+ &  & \texttt{Coup-8} & 5 & 2.15$\times$ & $10$ &  &  & \texttt{Coup-8} & 13 & 2.63$\times$ & $10$ \\
+ &  & \texttt{Coup-16} & 4 & 2.60$\times$ & $10$ &  &  & \texttt{Coup-16} & 11 & 3.21$\times$ & $10$ \\
+ &  & \texttt{G-TD} & 3 & 4.31$\times$ & $10$ &  &  & \texttt{G-TD} & 5 & 7.12$\times$ & $10$ \\
+ &  & \texttt{G-Coup} & \textbf{2} & 5.51$\times$ & $10$ &  &  & \texttt{G-Coup} & \textbf{4} & 9.71$\times$ & $10$ \\
+\midrule
+\multirow{8}{*}{70} & \multirow{8}{*}{6} & DPA-TS & -- & -- & $0^{(0, 10)}$ & \multirow{8}{*}{70} & \multirow{8}{*}{7} & DPA-TS & -- & -- & $0^{(0, 10)}$ \\
+ &  & DPA-A & -- & -- & $0^{(0, 10)}$ &  &  & DPA-A & -- & -- & $0^{(0, 10)}$ \\
+ &  & Coup & 1549 & 1.00$\times$ & $5^{(0, 5)}$ &  &  & Coup & 1650 & 1.00$\times$ & $3^{(0, 7)}$ \\
+ &  & \texttt{Coup-4} & 1326 & 1.17$\times$ & $7^{(0, 3)}$ &  &  & \texttt{Coup-4} & 1391 & 1.19$\times$ & $4^{(0, 6)}$ \\
+ &  & \texttt{Coup-8} & 1008 & 1.54$\times$ & $7^{(0, 3)}$ &  &  & \texttt{Coup-8} & 1757 & 0.94$\times$ & $6^{(0, 4)}$ \\
+ &  & \texttt{Coup-16} & 862 & 1.80$\times$ & $7^{(0, 3)}$ &  &  & \texttt{Coup-16} & 1708 & 0.97$\times$ & $7^{(0, 3)}$ \\
+ &  & \texttt{G-TD} & \textbf{335} & 4.63$\times$ & $6^{(4, 0)}$ &  &  & \texttt{G-TD} & \textbf{372} & 4.44$\times$ & $3^{(7, 0)}$ \\
+ &  & \texttt{G-Coup} & 1010 & 1.53$\times$ & $10$ &  &  & \texttt{G-Coup} & 907 & 1.82$\times$ & $6^{(3, 1)}$ \\
+\bottomrule
+\end{tabular}
+}
+\label{tab:mokp_result_short}
+\end{table*}
+
+\begin{table*}[t]
+\centering
+\scriptsize
+\caption{MOSPP Pareto Enumeration Runtime Comparison Across Enumeration Methods}
+\resizebox{0.7\textwidth}{!}{%
+\begin{tabular}{rrlrrl|rrlrrl}
+\toprule
+N & K & Method & Time (S) & Speed-up & $S^{(M,T)}$ & N & K & Method & Time (S) & Speed-up & $S^{(M,T)}$ \\
+\midrule
+\multirow{8}{*}{150} & \multirow{8}{*}{3} & DPA-TS & 11 & 1.12$\times$ & $10$ & \multirow{8}{*}{150} & \multirow{8}{*}{7} & DPA-TS & -- & -- & $0^{(0, 10)}$ \\
+ &  & DPA-A & 8 & 1.59$\times$ & $10$ &  &  & DPA-A & -- & -- & $0^{(0, 10)}$ \\
+ &  & Coup & 12 & 1.00$\times$ & $10$ &  &  & Coup & 184 & 1.00$\times$ & $10$ \\
+ &  & \texttt{Coup-4} & 8 & 1.50$\times$ & $10$ &  &  & \texttt{Coup-4} & 84 & 2.20$\times$ & $10$ \\
+ &  & \texttt{Coup-8} & 8 & 1.50$\times$ & $10$ &  &  & \texttt{Coup-8} & 71 & 2.61$\times$ & $10$ \\
+ &  & \texttt{Coup-16} & 8 & 1.51$\times$ & $10$ &  &  & \texttt{Coup-16} & 96 & 1.91$\times$ & $10$  \\
+ &  & \texttt{G-TD} & 7 & 1.80$\times$ & $10$ &  & & \texttt{G-TD} & \textbf{9} & 20.88$\times$ & $10$  \\
+ &  & \texttt{G-Coup} & \textbf{5} & 2.44$\times$ & $9^{(1, 0)}$ &  &  & \texttt{G-Coup} & 17 & 10.98$\times$ & $10$ \\
+\midrule
+\multirow{8}{*}{200} & \multirow{8}{*}{3} & DPA-TS & 32 & 5.15$\times$ & $10$ & \multirow{8}{*}{200} & \multirow{8}{*}{4} & DPA-TS & 913 & 0.20$\times$ & $10$\\
+ &  & DPA-A & \textbf{22} & 7.53$\times$ & $10$ &  &  & DPA-A & 793 & 0.23$\times$ & $10$\\
+ &  & Coup & 162 & 1.00$\times$ & $1^{(9, 0)}$  &  &  & Coup & 186 & 1.00$\times$ & $1^{(9, 0)}$ \\
+ &  & \texttt{Coup-4} & 93 & 1.75$\times$ & $1^{(9, 0)}$ &  &  & \texttt{Coup-4} & 80 & 2.34$\times$ & $1^{(9, 0)}$\\
+ &  & \texttt{Coup-8} & 87 & 1.86$\times$ & $1^{(9, 0)}$  &  &  & \texttt{Coup-8} & 63 & 2.97$\times$ & $1^{(9, 0)}$\\
+ &  & \texttt{Coup-16} & 72 & 2.27$\times$ & $1^{(8, 1)}$ &  &  &\texttt{Coup-16} & \textbf{45} & 4.12$\times$ & $1^{(9, 0)}$\\
+ &  & \texttt{G-TD} & -- & -- & $0^{(10, 0)}$  &  &  & \texttt{G-TD} & -- & -- & $0^{(10, 0)}$\\
+ &  & \texttt{G-Coup} & -- & -- & $0^{(10, 0)}$  & &  & \texttt{G-Coup} & -- & -- & $0^{(10, 0)}$\\
+\bottomrule
+\end{tabular}
+}
+\label{tab:mospp_result_short}
+\end{table*}
+
+\begin{table*}[t]
+\centering
+\scriptsize
+\caption{MOTSP Pareto Enumeration Runtime Comparison Across Enumeration Methods}
+\resizebox{0.7\textwidth}{!}{%
+\begin{tabular}{rrlrrl|rrlrrl}
+\toprule
+N & K & Method & Time (S) & Speed-up & $S^{(M,T)}$ & N & K & Method & Time (S) & Speed-up & $S^{(M,T)}$ \\
+\midrule
+\multirow{8}{*}{15} & \multirow{8}{*}{4} & DPA-TS & -- & -- & $0^{(0, 10)}$ & \multirow{8}{*}{15} & \multirow{8}{*}{5} & DPA-TS & -- & -- & $0^{(0, 10)}$ \\
+ &  & DPA-A & -- & -- & $0^{(0, 10)}$ &  &  & DPA-A & -- & -- & $0^{(0, 10)}$ \\
+ &  & Coup & 23 & 1.00$\times$ & $10$ &  &  & Coup & 335 & 1.00$\times$ & $10$ \\
+ &  & \texttt{Coup-4} & 7 & 3.47$\times$ & $10$ &  &  & \texttt{Coup-4} & 115 & 2.92$\times$ & $10$ \\
+ &  & \texttt{Coup-8} & 5 & 5.06$\times$ & $10$ &  &  & \texttt{Coup-8} & 82 & 4.11$\times$ & $10$ \\
+ &  & \texttt{Coup-16} & 3 & 7.83$\times$ & $10$ &  &  & \texttt{Coup-16} & 67 & 5.05$\times$ & $10$ \\
+ &  & \texttt{G-TD} & 3 & 7.50$\times$ & $10$ &  &  & \texttt{G-TD} & \textbf{36} & 9.44$\times$ & $9^{(1, 0)}$ \\
+ &  & \texttt{G-Coup} & \textbf{3} & 8.03$\times$ & $10$ &  &  & \texttt{G-Coup} & 48 & 7.04$\times$ & $10$ \\
+\midrule
+\multirow{8}{*}{15} & \multirow{8}{*}{6} & DPA-TS & -- & -- & $0^{(0, 10)}$ & \multirow{8}{*}{15} & \multirow{8}{*}{7} & DPA-TS & -- & -- & $0^{(0, 10)}$ \\
+ &  & DPA-A & -- & -- & $0^{(0, 10)}$ &  &  & DPA-A & -- & -- & $0^{(0, 10)}$ \\
+ &  & Coup & 1623 & 1.00$\times$ & $9^{(0, 1)}$ &  &  & Coup & 3544 & 1.00$\times$ & $1^{(0, 9)}$ \\
+ &  & \texttt{Coup-4} & 870 & 1.87$\times$ & $10$ &  &  & \texttt{Coup-4} & 2508 & 1.41$\times$ & $3^{(0, 7)}$ \\
+ &  & \texttt{Coup-8} & 711 & 2.28$\times$ & $10$ &  &  & \texttt{Coup-8} & 2123 & 1.67$\times$ & $3^{(0, 7)}$ \\
+ &  & \texttt{Coup-16} & 641 & 2.53$\times$ & $10$ &  &  & \texttt{Coup-16} & 1930 & 1.84$\times$ & $3^{(0, 7)}$ \\
+ &  & \texttt{G-TD} & -- & -- & $0^{(10, 0)}$ &  &  & \texttt{G-TD} & -- & -- & $0^{(10, 0)}$ \\
+ &  & \texttt{G-Coup} & \textbf{369} & 4.40$\times$ & $10$ &  &  & \texttt{G-Coup} & \textbf{1828} & 1.94$\times$ & $6^{(3, 1)}$ \\
+\bottomrule
+\end{tabular}
+}
+\label{tab:motsp_result_short}
+\end{table*}
+
+\section{Related Work}
+\label{sec:related}
+Our work is related to two lines of research: exact algorithms for multiobjective discrete optimization and parallel computing for discrete optimization. The first line provides the exact enumeration model on which DD-based Pareto frontier enumeration is built. The second line studies how the computational kernels of exact optimization algorithms can be accelerated on multi-core and many-core hardware.
+
+\subsection{Exact Multiobjective Discrete Optimization}
+\label{sec:related_exact}
+Exact algorithms for multiobjective discrete optimization are commonly divided into criterion-space, decision-space, and dynamic-programming or state-space approaches; see \citet{ehrgott2016exact,halffmann2022exact} for surveys. Criterion-space methods enumerate nondominated points by repeatedly solving scalarized or constrained single-objective subproblems while partitioning the unexplored objective space. Representative examples include recursive and box-decomposition schemes \citep{ozlen2009multi,ozlen2014multi,boland2015criterion}, parameter-space search \citep{kirlik2014new}, and recent objective-space algorithms for multiobjective integer programming \citep{dachert2024simple,tamby2020generic}. Decision-space methods instead generalize branch-and-bound or branch-and-cut to vector-valued bounds and dominance-based fathoming \citep{jozefowiez2012generic,przybylski2017multi,parragh2019branch,adelgren2022branch}.
+
+Dynamic-programming and state-space methods propagate sets of nondominated labels through a recursive model. Decision diagrams belong to this family. \citet{cire2016multiobjective} introduced multiobjective optimization by DDs, and \citet{bergman2022network} developed network models and reduction operations that make exact Pareto frontier enumeration competitive when a compact DD representation is available. Our work builds on this DD-based state-space approach. We do not change the exact enumeration model; instead, we parallelize its dominant operations: label generation, dominance filtering, cutset coupling, and frontier merging.
+
+\subsection{Parallel Computing for Discrete Optimization}
+Parallel computing has long been used to accelerate exact discrete optimization \citep{kindervater1986introduction}. Much of the classical work focuses on branch-and-bound, where parallelism comes from distributing search-tree nodes across processors \citep{gendron1994parallel,ralphs2003parallel,linderoth2003decomposition}. Such methods can scale well when the tree is effectively partitioned, but they also exhibit search-order effects such as the parallel branch-and-bound anomalies studied by \citet{lai1984anomalies}. Parallelism has also been studied in DD-based optimization: \citet{bergman2014parallel} proposed a parallel DD-based branch-and-bound framework that distributes DD node exploration across processors.
+
+More recent work has explored accelerator hardware. GPU implementations have been proposed for parts of simplex and linear-programming solvers \citep{lalami2011gpu,ploskas2016gpu,shin2025madipm}, and GPU-native first-order methods have shown strong performance on large-scale linear programs \citep{applegate2021practical,lu2025cupdlp,lu2023cupdlpc,lu2025cupdlpx}. For mixed-integer programming, GPU acceleration is harder because search trees are irregular; existing approaches typically keep the tree control on the CPU and offload selected kernels or heuristics to the GPU \citep{boyer2017gpu,ccorduk2025gpu}. Closest to our setting is the GPU-accelerated state expansion framework for anytime exact DD search of \citet{tardivo2026gpu}. In contrast, we study exact Pareto frontier enumeration on DDs, where the main parallel kernels are not tree-node relaxations but label generation, pairwise dominance filtering, and nondominated-set reduction.
+
+\section{Conclusion and Future Work}
+Better memory management and parallelization strategies are crucial for scaling exact multiobjective discrete optimization algorithms to larger problem instances. Our work demonstrates that GPU acceleration can significantly reduce the runtime of Pareto frontier enumeration, particularly for instances where intermediate frontiers fit within GPU memory. However, memory limitations remain a challenge, and future research should explore more efficient memory management techniques, such as dynamic memory allocation and compression strategies, to further enhance the scalability of GPU-based methods. Additionally, investigating hybrid CPU-GPU approaches may yield further performance improvements by leveraging the strengths of both architectures.
+
+\bibliography{references}
+
+\newpage
 
 \appendix
 
-\section{Previous Section 3 Draft}
-\label{app:previous_section_3}
+\section{Graphics Processing Unit}
+\label{sec:prelim_gpu}
 
-This appendix preserves the earlier Section~3 prose for comparison. The GPU algorithms that were originally embedded in this section remain in \Cref{sec:gpu_impl_rewrite}, since the rewritten methodology section refers to them directly.
+GPUs are throughput-oriented processors that achieve high performance by executing many lightweight threads in parallel. In contrast, CPUs comprise a small number of complex cores optimized for low-latency execution and sophisticated control flow. This architectural difference makes GPUs particularly effective for data-parallel workloads in which the same operation is applied independently across many inputs \cite{lindholm2008nvidia}.
+\Cref{fig:gpu_arch} illustrates the GPU execution and memory hierarchy. Computation is launched as a \emph{kernel}, which executes as a large collection of \emph{threads}. Threads are grouped into \emph{thread blocks}, and all blocks in a kernel launch form a \emph{grid} \cite{nickolls2008scalable}. The GPU schedules thread blocks onto \emph{Streaming Multiprocessors} (SMs), where each SM can host multiple blocks concurrently and executes threads in a \emph{Single Instruction Multiple Thread} (SIMT) manner, where threads follow the same instruction stream while operating on different data.
 
-\subsection{Parallelization Schemes}
 
-\subsubsection{Single thread per node}
-In this scheme, we exploit the inherent independence of nodes within the same layer to achieve parallelism. Specifically, the processing of any node $v \in \mathcal{L}_{j+1}$ relies exclusively on the finalized objective vectors of its predecessor nodes $u \in \mathcal{L}_j$. Because the operations performed on different destination nodes do not mutate or conflict with one another's memory space, we can process multiple nodes concurrently by assigning a single, dedicated execution thread to each node.
+\begin{figure}[tbp]
+    \centering
+    \resizebox{\linewidth}{!}{
+    \begin{tikzpicture}[
+        sm/.style={draw, thick, fill=blue!5, rounded corners, minimum width=3.8cm, minimum height=3.8cm},
+        block/.style={draw, dashed, thick, fill=blue!10, rounded corners, inner sep=3pt},
+        thread/.style={draw, fill=green!40, minimum width=0.25cm, minimum height=0.25cm, inner sep=0pt},
+        mem/.style={draw, thick, fill=orange!20, minimum width=3.2cm, minimum height=0.6cm, align=center},
+        l2/.style={draw, thick, fill=orange!25, minimum width=9cm, minimum height=0.7cm, align=center},
+        gmem/.style={draw, ultra thick, fill=orange!30, minimum width=9cm, minimum height=0.7cm, align=center},
+        device/.style={draw, ultra thick, fill=gray!10, rounded corners, inner sep=15pt}
+    ]
 
-For instance, in the coupled enumeration scheme (Algorithm~\ref{alg:coupled_pf}), the execution of \textsc{ExpandTopDown} (lines 5--10) and \textsc{ExpandBottomUp} (lines 14--19) can be parallelized over the outer loop of destination nodes. Furthermore, at the cutset layer $\mathcal{L}_c$, the convolution of the top-down and bottom-up frontiers (lines 34--36) can be parallelized across individual nodes since each convolution operates strictly on local label sets $\mathcal{Y}^{\downarrow}(u)$ and $\mathcal{Y}^{\uparrow}(u)$ associated with node $u$. By mapping a single thread per node, this scheme circumvents data races without the need for expensive thread synchronization mechanisms like locks.
+    % SM 1
+    \node[sm] (sm1) at (0,0) {};
+    \node[anchor=north, font=\bfseries, yshift=-0.1cm] at (sm1.north) {SM 1};
+    \node[mem, anchor=north, yshift=-0.7cm] (smem1) at (sm1.north) {Shared Mem / L1};
 
-\subsubsection{Multiple threads per node}
-While assigning a single thread per node is straightforward, the overall enumeration can be further accelerated by utilizing multiple threads to process a single node collaboratively. However, a naive implementation of such a scheme presents significant synchronization hazards. Consider the \textsc{ExpandTopDown} procedure, where multiple incoming arcs $(u,v)$ contribute to the same destination node $v$. A simplistic approach to multi-threading this step would be to assign a separate thread to each incoming arc. Each thread would expand the labels of the parent node of its assigned arc and attempt to merge and filter the generated candidates directly into the destination node's shared set, $\mathcal{Y}^{\downarrow}(v)$. This introduces the following critical synchronization issues.
-\begin{enumerate}
-\item \textbf{Data Races and Loss:} If threads attempt to update the shared label set concurrently without locks, memory corruption will occur, leading to the unpredictable loss of valid Pareto-optimal candidates.
-\item \textbf{Synchronization Bottlenecks:} If a lock is applied to the shared label set $\mathcal{Y}^{\downarrow}(v)$ to prevent data races, the execution essentially serializes, negating the benefits of multi-threading.
-\end{enumerate}
-To effectively leverage multiple cores per node without succumbing to locking bottlenecks, we can trade off memory for execution speed. Rather than merging candidates into a single shared set on the fly, we can decouple the expansion phase from the filtering phase. First, threads can safely evaluate the addition for all arcs in parallel, scattering the resulting candidate labels into disjoint, pre-allocated memory segments. Once all candidates for the node are materialized in memory, a pool of threads can cooperatively perform the computationally dominant $\mathcal{O}(|\mathcal{Y}|^2)$ dominance filtering operation over this complete set of candidates, allowing multiple threads to actively prune suboptimal vectors simultaneously without locks.
+    % SM 1 - Block 1
+    \node[block, minimum width=1.3cm, minimum height=1.3cm] (s1b1) at ($(sm1.center) + (-0.7, -0.4)$) {};
+    \node[font=\small, anchor=north, yshift=-0.05cm] at (s1b1.south) {Block};
+    \foreach \i/\x in {1/-0.3, 2/0, 3/0.3} {
+        \foreach \j/\y in {1/0.3, 2/0, 3/-0.3} {
+            \node[thread] (s1b1t\i\j) at ($(s1b1.center) + (\x, \y)$) {};
+        }
+    }
 
-Furthermore, assigning a \textit{fixed} number of threads to collaboratively process each node is suboptimal if the size of the intermediate Pareto frontiers $\mathcal{Y}^{\downarrow}(v)$ varies drastically across nodes within a given layer. If a static number of threads are allocated per node, the nodes with massive sets of incoming candidates will still bottleneck the overall layer progression, while the thread groups assigned to nodes with few candidates will prematurely finish and sit idle. Thus, an optimal multi-threaded strategy must dynamically allocate a variable number of threads to each node proportional to the size of its candidate label set to ensure an evenly balanced workload. In practice, our CPU implementation realizes the \textit{single thread per node} scheme, while the GPU architecture allows us to efficiently realize the \textit{multiple threads per node} scheme.
+    % SM 1 - Multiple Blocks Dots
+    \node[font=\Large] at ($(sm1.center) + (0.9, -0.4)$) {\dots};
 
-\subsection{Implementation}
+    % Explicit annotation for Threads
+    \draw[<-, thick] (s1b1t33.east) -- ++(0.5, 0) node[right, font=\small, inner sep=1pt] {Thread};
 
-\subsubsection{Central Processing Unit}
-The CPU implementation directly realizes the single thread per node parallelization scheme. At each layer $j$, the loop over destination nodes $v \in \mathcal{L}_{j+1}$ is parallelized with a \emph{dynamic work-stealing} schedule: since the number of incoming candidate labels per node varies widely across a layer, a static round-robin assignment would leave many cores idle while others process large frontier sets. Each assigned core processes all incoming arcs $(u,v)$ for its node sequentially, accumulating the Minkowski sums $\mathcal{Y}^{\downarrow}(u) \oplus \{\mathbf{v}(a)\}$ and applying the $\mathcal{O}(|\mathcal{Y}|^2)$ dominance filter entirely in thread-local memory, requiring no locks or synchronization. However, a core assigned to a node with a very large local frontier cannot offload work to idle cores, throttling the entire layer's throughput. This load-imbalance limitation motivates the GPU design below.
+    % Dots indicating more SMs
+    \node[right=0.25cm of sm1, font=\huge] (dots) {\dots};
 
-\subsubsection{Graphics Processing Unit}
-The GPU is well-suited to realize the multiple threads per node scheme: its massively parallel architecture executes thousands of lightweight threads concurrently, making it ideal for absorbing the data-parallelism in candidate generation and dominance filtering. \Cref{alg:gpu_coupled_pf} presents the GPU-accelerated coupled enumeration, which interleaves top-down and bottom-up layer expansions on the GPU, each decomposed into four data-parallel passes that call the subroutines in Algorithms~\ref{alg:compute_arc_offsets}--\ref{alg:compact_survivors}.
+    % SM N
+    \node[sm, right=0.25cm of dots] (smn) {};
+    \node[anchor=north, font=\bfseries, yshift=-0.1cm] at (smn.north) {SM $N$};
+    \node[mem, anchor=north, yshift=-0.7cm] (smemn) at (smn.north) {Shared Mem / L1};
 
-The \textsc{FlattenDD} subroutine in Algorithm~\ref{alg:gpu_coupled_pf} serializes the entire DD's arc connectivity for both traversal directions. For each layer $\mathcal{L}_j$, three groups of flat arrays are built. For \emph{top-down} expansion: the source-node index array $b^{\downarrow}[]$, the weight-vector array $\mathbf{v}^{\downarrow}[]$ (one $m$-vector per arc), and the per-node incoming-arc offset array $\phi^{a,\downarrow}[]$ (a CSR-style length-$(|\mathcal{L}_j|{+}1)$ array whose $k$-th entry is the index of the first incoming arc of node $k$). For \emph{bottom-up} expansion: the symmetric arrays $b^{\uparrow}[]$, $\mathbf{v}^{\uparrow}[]$, and $\phi^{a,\uparrow}[]$ built from outgoing arcs. The per-node out-degree $\delta^{\text{out}}[]$ and in-degree $\delta^{\text{in}}[]$ are packed for the scoring heuristic. All arrays are transferred to GPU global memory, amortizing the packing cost across all layer expansions. Back in the main procedure of Algorithm~\ref{alg:gpu_coupled_pf}, the top-down frontier is initialized with $\mathcal{Y}^{\downarrow}(\mathbf{r}) = \{\mathbf{0}\}$ at the root and the bottom-up frontier with $\mathcal{Y}^{\uparrow}(\mathbf{t}) = \{\mathbf{0}\}$ at the terminal, both in GPU memory.
+    % SM N - Block 1
+    \node[block, minimum width=1.3cm, minimum height=1.3cm] (snb1) at ($(smn.center) + (-0.7, -0.4)$) {};
+    \node[font=\small, anchor=north, yshift=-0.05cm] at (snb1.south) {Block};
+    \foreach \i/\x in {1/-0.3, 2/0, 3/0.3} {
+        \foreach \j/\y in {1/0.3, 2/0, 3/-0.3} {
+            \node[thread] (snb1t\i\j) at ($(snb1.center) + (\x, \y)$) {};
+        }
+    }
 
-The dynamic layer selection loop executes on the CPU (in Algorithm~\ref{alg:gpu_coupled_pf}) because each expansion depends on the prior layer's filtered results. At each step, the algorithm compares the heuristic expansion scores $s_{\text{td}}$ and $s_{\text{bu}}$, selecting the direction with the lower score. The score of a layer is computed on the GPU as the total number of candidates that expanding it would generate---the sum over all nodes of the product of the current frontier size and the number of outgoing (top-down) or incoming (bottom-up) arcs. The bottom-up score is scaled by a $1.5\times$ factor to bias the scheme toward top-down expansion, reflecting the empirically higher cost of bottom-up label growth. Within each selected layer expansion, the subroutines \textsc{ExpandLayerTopDown} and \textsc{ExpandLayerBottomUp} in Algorithm~\ref{alg:gpu_coupled_pf} are executed. Both subroutines invoke the same sequence of four GPU passes, using their respective direction-specific packed arrays.
+    % SM N - Multiple Blocks Dots
+    \node[font=\Large] at ($(smn.center) + (0.9, -0.4)$) {\dots};
 
-\textbf{Arc-level offset computation} (\Cref{alg:compute_arc_offsets}): for each arc $a = (u,v)$, one GPU thread reads the source node's frontier size $|\mathcal{Y}(u)|$, yielding a per-arc candidate count $\kappa_a$. An exclusive prefix sum over these counts produces per-arc buffer offsets $\phi^c_a$, which determine where each arc's candidates will be written in the flat buffer $\beta$. The per-destination-node candidate total $\Gamma_v$ is derived from the difference between the edge offsets of the last and first incoming arcs of $v$.
+    % Logical Grid Brace
+    \draw[decorate, decoration={brace, amplitude=10pt}, ultra thick, purple!80!black]
+        ([yshift=0.2cm]sm1.north west) -- ([yshift=0.2cm]smn.north east)
+        node[midway, above=12pt, font=\bfseries, purple!80!black] {Grid (Logical Collection of Thread Blocks)};
 
-\textbf{Candidate expansion} (\Cref{alg:expand_candidates}): the flat buffer $\beta$ is populated with shifted labels. Each arc $a$ is assigned to a \emph{warp}---a fixed group of 32 GPU threads that execute the same instruction simultaneously, each on different data. The threads within a warp cooperatively iterate over the source node's labels, with each thread handling one label at a time. Since the prefix sum in the previous step guarantees that each arc's output segment $[\phi^c_a,\ \phi^c_a + \kappa_a)$ is non-overlapping, threads for different arcs write to disjoint memory regions without synchronization.
+    % L2 Cache (Centered between SM1 and SMN)
+    \node[l2, anchor=north] (l2cache) at ($(sm1.south)!0.5!(smn.south) + (0, -0.8cm)$) {\textbf{L2 Cache}};
 
-\textbf{Load-balanced dominance filtering} (\Cref{alg:dynamic_1D_kernel}): each destination node $v$ receives $K_v = \lceil \Gamma_v / B \rceil$ thread blocks (where $B$ is the block size). A prefix sum over $K_v$ yields a block-offset array $\phi^k$ that maps each block to its target node. A tightly packed grid of $\sum_v K_v$ blocks is launched; each block locates its target node via binary search, ensuring no blocks sit idle.
+    % Global Memory
+    \node[gmem, below=0.8cm of l2cache] (globalmem) {\textbf{Global Memory (DRAM)}};
 
-Within each thread block, two levels of the memory hierarchy are exploited. Each thread loads its own candidate $\mathbf{y}_i$ from global GPU memory (high-latency DRAM) once into a \emph{per-thread private register} (line~10), retaining it for all tile comparisons without re-reading global memory. The $B$ block members then cooperatively load a tile of $B$ reference candidates into \emph{shared memory} (fast on-chip scratchpad visible to all threads in the block), one reference per thread (lines~13--14). Two barrier synchronizations bracket this load so all threads see a consistent tile. Each thread checks $\mathbf{y}_i$ against all $B$ references; a dominance detection immediately breaks both the within-tile and across-tile loops (lines~17--19), avoiding redundant comparisons.
+    % Connections
+    \draw[<->, thick] (sm1.south) -- (sm1.south |- l2cache.north);
+    \draw[<->, thick] (smn.south) -- (smn.south |- l2cache.north);
+    \draw[<->, ultra thick] (l2cache.south) -- (globalmem.north);
 
-\textbf{Survivor compaction} (\Cref{alg:compact_survivors}): the dominance filter produces a binary flag $\sigma_i \in \{0, 1\}$ for each candidate $i$, where $\sigma_i = 1$ indicates that candidate $i$ was not Pareto dominated. An exclusive prefix sum over these flags computes each survivor's compacted output position $\rho_i$. A final scatter pass writes only the survivors into the per-node label sets $\mathcal{Y}(v)$.
+    % Device Background Layer
+    \begin{scope}[on background layer]
+        % Add a hidden coordinate to push the top border up slightly for the label and brace
+        \coordinate (topleft) at ([xshift=-0.2cm, yshift=1.6cm]sm1.north west);
+        \node[device, fit=(topleft) (smn) (globalmem)] (gpu) {};
+        \node[anchor=north west, font=\Large\bfseries] at (gpu.north west) {GPU Device};
+    \end{scope}
 
-Once the two frontiers meet at the cutset layer $\mathcal{L}_c$, the final convolving and merging step is delegated to the GPU subroutine \Call{CutsetCoupling}{} (\Cref{alg:gpu_cutset_coupling}). This subroutine filters for active nodes $\mathcal{V}^*_c \subseteq \mathcal{L}_c$ that possess non-empty frontiers in both directions (line~1), since nodes lacking either cannot produce feasible complete paths. To maximize GPU execution efficiency and prevent warp divergence, the active nodes are sorted in descending order of their total frontier sizes $\text{score}(v) = \kappa^{\downarrow}_v + \kappa^{\uparrow}_v$. They are then processed in load-balanced, memory-bounded batches $\mathcal{B}$ s.t.\ the total number of Cartesian product candidates generated per batch does not exceed $B_{\max}$ (default 625,000).
+    \end{tikzpicture}}
+    \caption{Schematic representation of a GPU architecture.}
+    \label{fig:gpu_arch}
+\end{figure}
+The memory system is also hierarchical. Threads within an SM have access to fast on-chip storage, including registers and shared memory, which enables efficient intra-block cooperation and synchronization. SMs connect to a larger, device-wide cache (L2) and ultimately to high-capacity but high-latency global memory (DRAM). Effective GPU implementations therefore aim to expose ample parallelism while limiting expensive global-memory traffic \cite{nickolls2010gpu}.
+This execution model is well suited for workloads dominated by large numbers of independent arithmetic operations and comparisons. In particular, pairwise dominance checks required during PF enumeration in Algorithm~\ref{alg:coupled_pf} are natural candidates for GPU acceleration.
 
-For each batch $\mathcal{B}$, a custom GPU kernel materializes the Minkowski sum candidates $\beta$ (\Cref{alg:materialize_cutset_products}). Since convolving clean frontiers can generate redundant duplicates or dominated points, each batch undergoes a three-stage filtering pipeline on the GPU: (1)~filtering against the running global frontier $\mathcal{Y}^{\text{global}}$ (line~9) to prune candidates dominated by already found solutions, (2)~local self-pruning (line~11) using the 1D dominance filter to remove intra-batch dominated points, and (3)~mutual merging (line~13) which filters the running global frontier against the batch survivors, and then concatenates the remaining candidates.
 
-\section{CPU Implementation}
-\label{app:cpu_implementation}
 
-\begin{algorithm}[htbp]
-\caption{CPU Pairwise Tree Reduction of Cutset Frontiers}
-\label{alg:cpu_tree_reduction}
-\begin{algorithmic}[1]
-\Require Private cutset frontiers $\mathcal{P} = [\mathcal{P}_1,\dots,\mathcal{P}_q]$
-\Procedure{TreeReduce}{$\mathcal{P}$}
-    \While{$|\mathcal{P}| > 1$}
-        \State $\mathcal{Q} \gets [\,]$
-        \ForAll{$i = 1,3,5,\dots,2\lfloor |\mathcal{P}|/2 \rfloor - 1$ \textbf{in parallel}}
-            \State $\mathcal{Q}_{(i+1)/2} \gets \Call{FilterDominated}{\mathcal{P}_i \cup \mathcal{P}_{i+1}}$
-        \EndFor
-        \If{$|\mathcal{P}|$ is odd}
-            \State $\mathcal{Q}_{\lfloor |\mathcal{P}|/2 \rfloor + 1} \gets \mathcal{P}_{|\mathcal{P}|}$
-        \EndIf
-        \State $\mathcal{P} \gets \mathcal{Q}$
-    \EndWhile
-    \State \Return $\mathcal{P}_1$
-\EndProcedure
-\end{algorithmic}
-\end{algorithm}
 
-\section{Top-Down Enumeration Variant}
-\label{app:top_down_variant}
+% \section{Previous Section 3 Draft}
+% \label{app:previous_section_3}
 
-A one-sided enumeration variant fixes the terminal-side layer pointer at $\mathcal{L}_{n+1}$ and expands only from the root side, as shown in \Cref{alg:top_down_pf}. The cutset is then the terminal layer, and the terminal node frontier is the Pareto frontier.
+% This appendix preserves the earlier Section~3 prose for comparison. The GPU algorithms that were originally embedded in this section remain in \Cref{sec:gpu_impl_rewrite}, since the rewritten methodology section refers to them directly.
 
-\begin{algorithm}[htbp]
-\caption{Top-Down Pareto Frontier Enumeration}
-\label{alg:top_down_pf}
-\begin{algorithmic}[1]
-\Require Exact decision diagram $\mathcal{D} = (\mathcal{N}, \mathcal{A})$ with layers $\mathcal{L}_1, \dots, \mathcal{L}_{n+1}$
-\State $\mathcal{Y}^{\downarrow}(u) \gets \emptyset$ for all $u \in \mathcal{N}$
-\State $\mathcal{Y}^{\downarrow}(\mathbf{r}) \gets \{\mathbf{0}\}$ \Comment{$\mathbf{r}$ is the root node in $\mathcal{L}_1$, $\mathbf{0} \in \mathbb{R}^m$}
-\For{$j = 1$ \textbf{to} $n$}
-    \State \Call{ExpandTopDown}{$j, \mathcal{Y}^{\downarrow}$}
-\EndFor
-\State \Return $\mathcal{Y}^{\downarrow}(\mathbf{t})$ \Comment{$\mathbf{t}$ is the terminal node in $\mathcal{L}_{n+1}$}
-\end{algorithmic}
-\end{algorithm}
+% \subsection{Parallelization Schemes}
 
-\bibliography{references}
+% \subsubsection{Single thread per node}
+% In this scheme, we exploit the inherent independence of nodes within the same layer to achieve parallelism. Specifically, the processing of any node $v \in \mathcal{L}_{j+1}$ relies exclusively on the finalized objective vectors of its predecessor nodes $u \in \mathcal{L}_j$. Because the operations performed on different destination nodes do not mutate or conflict with one another's memory space, we can process multiple nodes concurrently by assigning a single, dedicated execution thread to each node.
+
+% For instance, in the coupled enumeration scheme (Algorithm~\ref{alg:coupled_pf}), the execution of \textsc{ExpandTopDown} (lines 5--10) and \textsc{ExpandBottomUp} (lines 14--19) can be parallelized over the outer loop of destination nodes. Furthermore, at the cutset layer $\mathcal{L}_c$, the convolution of the top-down and bottom-up frontiers (lines 34--36) can be parallelized across individual nodes since each convolution operates strictly on local label sets $\mathcal{Y}^{\downarrow}(u)$ and $\mathcal{Y}^{\uparrow}(u)$ associated with node $u$. By mapping a single thread per node, this scheme circumvents data races without the need for expensive thread synchronization mechanisms like locks.
+
+% \subsubsection{Multiple threads per node}
+% While assigning a single thread per node is straightforward, the overall enumeration can be further accelerated by utilizing multiple threads to process a single node collaboratively. However, a naive implementation of such a scheme presents significant synchronization hazards. Consider the \textsc{ExpandTopDown} procedure, where multiple incoming arcs $(u,v)$ contribute to the same destination node $v$. A simplistic approach to multi-threading this step would be to assign a separate thread to each incoming arc. Each thread would expand the labels of the parent node of its assigned arc and attempt to merge and filter the generated candidates directly into the destination node's shared set, $\mathcal{Y}^{\downarrow}(v)$. This introduces the following critical synchronization issues.
+% \begin{enumerate}
+% \item \textbf{Data Races and Loss:} If threads attempt to update the shared label set concurrently without locks, memory corruption will occur, leading to the unpredictable loss of valid Pareto-optimal candidates.
+% \item \textbf{Synchronization Bottlenecks:} If a lock is applied to the shared label set $\mathcal{Y}^{\downarrow}(v)$ to prevent data races, the execution essentially serializes, negating the benefits of multi-threading.
+% \end{enumerate}
+% To effectively leverage multiple cores per node without succumbing to locking bottlenecks, we can trade off memory for execution speed. Rather than merging candidates into a single shared set on the fly, we can decouple the expansion phase from the filtering phase. First, threads can safely evaluate the addition for all arcs in parallel, scattering the resulting candidate labels into disjoint, pre-allocated memory segments. Once all candidates for the node are materialized in memory, a pool of threads can cooperatively perform the computationally dominant $\mathcal{O}(|\mathcal{Y}|^2)$ dominance filtering operation over this complete set of candidates, allowing multiple threads to actively prune suboptimal vectors simultaneously without locks.
+
+% Furthermore, assigning a \textit{fixed} number of threads to collaboratively process each node is suboptimal if the size of the intermediate Pareto frontiers $\mathcal{Y}^{\downarrow}(v)$ varies drastically across nodes within a given layer. If a static number of threads are allocated per node, the nodes with massive sets of incoming candidates will still bottleneck the overall layer progression, while the thread groups assigned to nodes with few candidates will prematurely finish and sit idle. Thus, an optimal multi-threaded strategy must dynamically allocate a variable number of threads to each node proportional to the size of its candidate label set to ensure an evenly balanced workload. In practice, our CPU implementation realizes the \textit{single thread per node} scheme, while the GPU architecture allows us to efficiently realize the \textit{multiple threads per node} scheme.
+
+% \subsection{Implementation}
+
+% \subsubsection{Central Processing Unit}
+% The CPU implementation directly realizes the single thread per node parallelization scheme. At each layer $j$, the loop over destination nodes $v \in \mathcal{L}_{j+1}$ is parallelized with a \emph{dynamic work-stealing} schedule: since the number of incoming candidate labels per node varies widely across a layer, a static round-robin assignment would leave many cores idle while others process large frontier sets. Each assigned core processes all incoming arcs $(u,v)$ for its node sequentially, accumulating the Minkowski sums $\mathcal{Y}^{\downarrow}(u) \oplus \{\mathbf{v}(a)\}$ and applying the $\mathcal{O}(|\mathcal{Y}|^2)$ dominance filter entirely in thread-local memory, requiring no locks or synchronization. However, a core assigned to a node with a very large local frontier cannot offload work to idle cores, throttling the entire layer's throughput. This load-imbalance limitation motivates the GPU design below.
+
+% \subsubsection{Graphics Processing Unit}
+% The GPU is well-suited to realize the multiple threads per node scheme: its massively parallel architecture executes thousands of lightweight threads concurrently, making it ideal for absorbing the data-parallelism in candidate generation and dominance filtering. \Cref{alg:gpu_coupled_pf} presents the GPU-accelerated coupled enumeration, which interleaves top-down and bottom-up layer expansions on the GPU, each decomposed into four data-parallel passes that call the subroutines in Algorithms~\ref{alg:compute_arc_offsets}--\ref{alg:compact_survivors}.
+
+% The \textsc{FlattenDD} subroutine in Algorithm~\ref{alg:gpu_coupled_pf} serializes the entire DD's arc connectivity for both traversal directions. For each layer $\mathcal{L}_j$, three groups of flat arrays are built. For \emph{top-down} expansion: the source-node index array $b^{\downarrow}[]$, the weight-vector array $\mathbf{v}^{\downarrow}[]$ (one $m$-vector per arc), and the per-node incoming-arc offset array $\phi^{a,\downarrow}[]$ (a CSR-style length-$(|\mathcal{L}_j|{+}1)$ array whose $k$-th entry is the index of the first incoming arc of node $k$). For \emph{bottom-up} expansion: the symmetric arrays $b^{\uparrow}[]$, $\mathbf{v}^{\uparrow}[]$, and $\phi^{a,\uparrow}[]$ built from outgoing arcs. The per-node out-degree $\delta^{\text{out}}[]$ and in-degree $\delta^{\text{in}}[]$ are packed for the scoring heuristic. All arrays are transferred to GPU global memory, amortizing the packing cost across all layer expansions. Back in the main procedure of Algorithm~\ref{alg:gpu_coupled_pf}, the top-down frontier is initialized with $\mathcal{Y}^{\downarrow}(\mathbf{r}) = \{\mathbf{0}\}$ at the root and the bottom-up frontier with $\mathcal{Y}^{\uparrow}(\mathbf{t}) = \{\mathbf{0}\}$ at the terminal, both in GPU memory.
+
+% The dynamic layer selection loop executes on the CPU (in Algorithm~\ref{alg:gpu_coupled_pf}) because each expansion depends on the prior layer's filtered results. At each step, the algorithm compares the heuristic expansion scores $s_{\text{td}}$ and $s_{\text{bu}}$, selecting the direction with the lower score. The score of a layer is computed on the GPU as the total number of candidates that expanding it would generate---the sum over all nodes of the product of the current frontier size and the number of outgoing (top-down) or incoming (bottom-up) arcs. The bottom-up score is scaled by a $1.5\times$ factor to bias the scheme toward top-down expansion, reflecting the empirically higher cost of bottom-up label growth. Within each selected layer expansion, the subroutines \textsc{ExpandLayerTopDown} and \textsc{ExpandLayerBottomUp} in Algorithm~\ref{alg:gpu_coupled_pf} are executed. Both subroutines invoke the same sequence of four GPU passes, using their respective direction-specific packed arrays.
+
+% \textbf{Arc-level offset computation} (\Cref{alg:compute_arc_offsets}): for each arc $a = (u,v)$, one GPU thread reads the source node's frontier size $|\mathcal{Y}(u)|$, yielding a per-arc candidate count $\kappa_a$. An exclusive prefix sum over these counts produces per-arc buffer offsets $\phi^c_a$, which determine where each arc's candidates will be written in the flat buffer $\beta$. The per-destination-node candidate total $\Gamma_v$ is derived from the difference between the edge offsets of the last and first incoming arcs of $v$.
+
+% \textbf{Candidate expansion} (\Cref{alg:expand_candidates}): the flat buffer $\beta$ is populated with shifted labels. Each arc $a$ is assigned to a \emph{warp}---a fixed group of 32 GPU threads that execute the same instruction simultaneously, each on different data. The threads within a warp cooperatively iterate over the source node's labels, with each thread handling one label at a time. Since the prefix sum in the previous step guarantees that each arc's output segment $[\phi^c_a,\ \phi^c_a + \kappa_a)$ is non-overlapping, threads for different arcs write to disjoint memory regions without synchronization.
+
+% \textbf{Load-balanced dominance filtering} (\Cref{alg:dynamic_1D_kernel}): each destination node $v$ receives $K_v = \lceil \Gamma_v / B \rceil$ thread blocks (where $B$ is the block size). A prefix sum over $K_v$ yields a block-offset array $\phi^k$ that maps each block to its target node. A tightly packed grid of $\sum_v K_v$ blocks is launched; each block locates its target node via binary search, ensuring no blocks sit idle.
+
+% Within each thread block, two levels of the memory hierarchy are exploited. Each thread loads its own candidate $\mathbf{y}_i$ from global GPU memory (high-latency DRAM) once into a \emph{per-thread private register} (line~10), retaining it for all tile comparisons without re-reading global memory. The $B$ block members then cooperatively load a tile of $B$ reference candidates into \emph{shared memory} (fast on-chip scratchpad visible to all threads in the block), one reference per thread (lines~13--14). Two barrier synchronizations bracket this load so all threads see a consistent tile. Each thread checks $\mathbf{y}_i$ against all $B$ references; a dominance detection immediately breaks both the within-tile and across-tile loops (lines~17--19), avoiding redundant comparisons.
+
+% \textbf{Survivor compaction} (\Cref{alg:compact_survivors}): the dominance filter produces a binary flag $\sigma_i \in \{0, 1\}$ for each candidate $i$, where $\sigma_i = 1$ indicates that candidate $i$ was not Pareto dominated. An exclusive prefix sum over these flags computes each survivor's compacted output position $\rho_i$. A final scatter pass writes only the survivors into the per-node label sets $\mathcal{Y}(v)$.
+
+% Once the two frontiers meet at the cutset layer $\mathcal{L}_c$, the final convolving and merging step is delegated to the GPU subroutine \Call{CutsetCoupling}{} (\Cref{alg:gpu_cutset_coupling}). This subroutine filters for active nodes $\mathcal{V}^*_c \subseteq \mathcal{L}_c$ that possess non-empty frontiers in both directions (line~1), since nodes lacking either cannot produce feasible complete paths. To maximize GPU execution efficiency and prevent warp divergence, the active nodes are sorted in descending order of their total frontier sizes $\text{score}(v) = \kappa^{\downarrow}_v + \kappa^{\uparrow}_v$. They are then processed in load-balanced, memory-bounded batches $\mathcal{B}$ s.t.\ the total number of Cartesian product candidates generated per batch does not exceed $B_{\max}$ (default 625,000).
+
+% For each batch $\mathcal{B}$, a custom GPU kernel materializes the Minkowski sum candidates $\beta$ (\Cref{alg:materialize_cutset_products}). Since convolving clean frontiers can generate redundant duplicates or dominated points, each batch undergoes a three-stage filtering pipeline on the GPU: (1)~filtering against the running global frontier $\mathcal{Y}^{\text{global}}$ (line~9) to prune candidates dominated by already found solutions, (2)~local self-pruning (line~11) using the 1D dominance filter to remove intra-batch dominated points, and (3)~mutual merging (line~13) which filters the running global frontier against the batch survivors, and then concatenates the remaining candidates.
+
+% \section{CPU Implementation}
+% \label{app:cpu_implementation}
+
+% \begin{algorithm}[htbp]
+% \caption{CPU Pairwise Tree Reduction of Cutset Frontiers}
+% \label{alg:cpu_tree_reduction}
+% \begin{algorithmic}[1]
+% \Require Private cutset frontiers $\mathcal{P} = [\mathcal{P}_1,\dots,\mathcal{P}_q]$
+% \Procedure{TreeReduce}{$\mathcal{P}$}
+%     \While{$|\mathcal{P}| > 1$}
+%         \State $\mathcal{Q} \gets [\,]$
+%         \ForAll{$i = 1,3,5,\dots,2\lfloor |\mathcal{P}|/2 \rfloor - 1$ \textbf{in parallel}}
+%             \State $\mathcal{Q}_{(i+1)/2} \gets \Call{FilterDominated}{\mathcal{P}_i \cup \mathcal{P}_{i+1}}$
+%         \EndFor
+%         \If{$|\mathcal{P}|$ is odd}
+%             \State $\mathcal{Q}_{\lfloor |\mathcal{P}|/2 \rfloor + 1} \gets \mathcal{P}_{|\mathcal{P}|}$
+%         \EndIf
+%         \State $\mathcal{P} \gets \mathcal{Q}$
+%     \EndWhile
+%     \State \Return $\mathcal{P}_1$
+% \EndProcedure
+% \end{algorithmic}
+% \end{algorithm}
+
+% \section{Top-Down Enumeration Variant}
+% \label{app:top_down_variant}
+
+% A one-sided enumeration variant fixes the terminal-side layer pointer at $\mathcal{L}_{n+1}$ and expands only from the root side, as shown in \Cref{alg:top_down_pf}. The cutset is then the terminal layer, and the terminal node frontier is the Pareto frontier.
+
+% \begin{algorithm}[htbp]
+% \caption{Top-Down Pareto Frontier Enumeration}
+% \label{alg:top_down_pf}
+% \begin{algorithmic}[1]
+% \Require Exact decision diagram $\mathcal{D} = (\mathcal{N}, \mathcal{A})$ with layers $\mathcal{L}_1, \dots, \mathcal{L}_{n+1}$
+% \State $\mathcal{Y}^{\downarrow}(u) \gets \emptyset$ for all $u \in \mathcal{N}$
+% \State $\mathcal{Y}^{\downarrow}(\mathbf{r}) \gets \{\mathbf{0}\}$ \Comment{$\mathbf{r}$ is the root node in $\mathcal{L}_1$, $\mathbf{0} \in \mathbb{R}^m$}
+% \For{$j = 1$ \textbf{to} $n$}
+%     \State \Call{ExpandTopDown}{$j, \mathcal{Y}^{\downarrow}$}
+% \EndFor
+% \State \Return $\mathcal{Y}^{\downarrow}(\mathbf{t})$ \Comment{$\mathbf{t}$ is the terminal node in $\mathcal{L}_{n+1}$}
+% \end{algorithmic}
+% \end{algorithm}
+
+\section{Additional Experimental Results}
+
+\subsection{Results}
+\begin{table*}[t]
+\centering
+\scriptsize
+\caption{MOKP Pareto Enumeration Runtime Comparison Across Enumeration Methods}
+\resizebox{0.7\textwidth}{!}{%
+\begin{tabular}{rrlrrl|rrlrrl}
+\toprule
+N & K & Method & Time (S) & Speed-up & $S^{(M,T)}$ & N & K & Method & Time (S) & Speed-up & $S^{(M,T)}$ \\
+\midrule
+\multirow{8}{*}{40} & \multirow{8}{*}{6} & DPA-TS & 1371 & 0.01$\times$ & $2^{(0, 8)}$ & \multirow{8}{*}{40} & \multirow{8}{*}{7} & DPA-TS & -- & -- & $0^{(0, 10)}$ \\
+ &  & DPA-A & 1439 & 0.01$\times$ & $2^{(0, 8)}$ &  &  & DPA-A & -- & -- & $0^{(0, 10)}$ \\
+ &  & Coup & 10 & 1.00$\times$ & $10$ &  &  & Coup & 33 & 1.00$\times$ & $10$ \\
+ &  & \texttt{Coup-4} & 6 & 1.87$\times$ & $10$ &  &  & \texttt{Coup-4} & 16 & 2.12$\times$ & $10$ \\
+ &  & \texttt{Coup-8} & 5 & 2.15$\times$ & $10$ &  &  & \texttt{Coup-8} & 13 & 2.63$\times$ & $10$ \\
+ &  & \texttt{Coup-16} & 4 & 2.60$\times$ & $10$ &  &  & \texttt{Coup-16} & 11 & 3.21$\times$ & $10$ \\
+ &  & \texttt{G-TD} & 3 & 4.31$\times$ & $10$ &  &  & \texttt{G-TD} & 5 & 7.12$\times$ & $10$ \\
+ &  & \texttt{G-Coup} & \textbf{2} & 5.51$\times$ & $10$ &  &  & \texttt{G-Coup} & \textbf{4} & 9.71$\times$ & $10$ \\
+\midrule
+\multirow{8}{*}{50} & \multirow{8}{*}{5} & DPA-TS & 1752 & 0.01$\times$ & $5^{(0, 5)}$ & \multirow{8}{*}{50} & \multirow{8}{*}{6} & DPA-TS & -- & -- & $0^{(0, 10)}$ \\
+ &  & DPA-A & 1625 & 0.01$\times$ & $5^{(0, 5)}$ &  &  & DPA-A & -- & -- & $0^{(0, 10)}$ \\
+ &  & Coup & 19 & 1.00$\times$ & $10$ &  &  & Coup & 184 & 1.00$\times$ & $10$ \\
+ &  & \texttt{Coup-4} & 9 & 2.06$\times$ & $10$ &  &  & \texttt{Coup-4} & 82 & 2.26$\times$ & $10$ \\
+ &  & \texttt{Coup-8} & 8 & 2.42$\times$ & $10$ &  &  & \texttt{Coup-8} & 63 & 2.94$\times$ & $10$ \\
+ &  & \texttt{Coup-16} & 7 & 2.93$\times$ & $10$ &  &  & \texttt{Coup-16} & 52 & 3.59$\times$ & $10$ \\
+ &  & \texttt{G-TD} & \textbf{3} & 6.49$\times$ & $10$ &  &  & \texttt{G-TD} & 45 & 4.09$\times$ & $10$ \\
+ &  & \texttt{G-Coup} & 4 & 5.89$\times$ & $10$ &  &  & \texttt{G-Coup} & \textbf{26} & 7.12$\times$ & $10$ \\
+\midrule
+\multirow{8}{*}{50} & \multirow{8}{*}{7} & DPA-TS & -- & -- & $0^{(0, 10)}$ & \multirow{8}{*}{60} & \multirow{8}{*}{4} & DPA-TS & 1102 & 0.01$\times$ & $9^{(0, 1)}$ \\
+ &  & DPA-A & -- & -- & $0^{(0, 10)}$ &  &  & DPA-A & 925 & 0.02$\times$ & $9^{(0, 1)}$ \\
+ &  & Coup & 499 & 1.00$\times$ & $10$ &  &  & Coup & 16 & 1.00$\times$ & $10$ \\
+ &  & \texttt{Coup-4} & 229 & 2.18$\times$ & $10$ &  &  & \texttt{Coup-4} & 8 & 2.04$\times$ & $10$ \\
+ &  & \texttt{Coup-8} & 180 & 2.78$\times$ & $10$ &  &  & \texttt{Coup-8} & 7 & 2.36$\times$ & $10$ \\
+ &  & \texttt{Coup-16} & 150 & 3.34$\times$ & $10$ &  &  & \texttt{Coup-16} & 6 & 3.01$\times$ & $10$ \\
+ &  & \texttt{G-TD} & \textbf{81} & 6.20$\times$ & $10$ &  &  & \texttt{G-TD} & \textbf{3} & 7.74$\times$ & $10$ \\
+ &  & \texttt{G-Coup} & 82 & 6.08$\times$ & $10$ &  &  & \texttt{G-Coup} & 3 & 6.98$\times$ & $10$ \\
+\midrule
+\multirow{8}{*}{60} & \multirow{8}{*}{5} & DPA-TS & -- & -- & $0^{(0, 10)}$ & \multirow{8}{*}{60} & \multirow{8}{*}{6} & DPA-TS & -- & -- & $0^{(0, 10)}$ \\
+ &  & DPA-A & -- & -- & $0^{(0, 10)}$ &  &  & DPA-A & -- & -- & $0^{(0, 10)}$ \\
+ &  & Coup & 190 & 1.00$\times$ & $10$ &  &  & Coup & 849 & 1.00$\times$ & $8^{(0, 2)}$ \\
+ &  & \texttt{Coup-4} & 84 & 2.27$\times$ & $10$ &  &  & \texttt{Coup-4} & 678 & 1.25$\times$ & $10$ \\
+ &  & \texttt{Coup-8} & 67 & 2.83$\times$ & $10$ &  &  & \texttt{Coup-8} & 424 & 2.00$\times$ & $10$ \\
+ &  & \texttt{Coup-16} & 57 & 3.34$\times$ & $10$ &  &  & \texttt{Coup-16} & 341 & 2.49$\times$ & $10$ \\
+ &  & \texttt{G-TD} & \textbf{30} & 6.31$\times$ & $10$ &  &  & \texttt{G-TD} & 201 & 4.23$\times$ & $10$ \\
+ &  & \texttt{G-Coup} & 30 & 6.31$\times$ & $10$ &  &  & \texttt{G-Coup} & \textbf{156} & 5.45$\times$ & $10$ \\
+\midrule
+\multirow{8}{*}{60} & \multirow{8}{*}{7} & DPA-TS & -- & -- & $0^{(0, 10)}$ & \multirow{8}{*}{70} & \multirow{8}{*}{3} & DPA-TS & 87 & 0.05$\times$ & $10$ \\
+ &  & DPA-A & -- & -- & $0^{(0, 10)}$ &  &  & DPA-A & 62 & 0.07$\times$ & $10$ \\
+ &  & Coup & 1244 & 1.00$\times$ & $6^{(0, 4)}$ &  &  & Coup & 5 & 1.00$\times$ & $10$ \\
+ &  & \texttt{Coup-4} & 969 & 1.28$\times$ & $7^{(0, 3)}$ &  &  & \texttt{Coup-4} & 3 & 1.61$\times$ & $10$ \\
+ &  & \texttt{Coup-8} & 730 & 1.71$\times$ & $7^{(0, 3)}$ &  &  & \texttt{Coup-8} & 3 & 1.61$\times$ & $10$ \\
+ &  & \texttt{Coup-16} & 607 & 2.05$\times$ & $7^{(0, 3)}$ &  &  & \texttt{Coup-16} & 3 & 1.80$\times$ & $10$ \\
+ &  & \texttt{G-TD} & \textbf{325} & 3.83$\times$ & $6^{(4, 0)}$ &  &  & \texttt{G-TD} & \textbf{2} & 3.38$\times$ & $10$ \\
+ &  & \texttt{G-Coup} & 787 & 1.58$\times$ & $10$ &  &  & \texttt{G-Coup} & 2 & 2.78$\times$ & $10$ \\
+\midrule
+\multirow{8}{*}{70} & \multirow{8}{*}{4} & DPA-TS & 2144 & 0.03$\times$ & $6^{(0, 4)}$ & \multirow{8}{*}{70} & \multirow{8}{*}{5} & DPA-TS & -- & -- & $0^{(0, 10)}$ \\
+ &  & DPA-A & 2130 & 0.03$\times$ & $7^{(0, 3)}$ &  &  & DPA-A & -- & -- & $0^{(0, 10)}$ \\
+ &  & Coup & 70 & 1.00$\times$ & $10$ &  &  & Coup & 768 & 1.00$\times$ & $8^{(0, 2)}$ \\
+ &  & \texttt{Coup-4} & 33 & 2.12$\times$ & $10$ &  &  & \texttt{Coup-4} & 728 & 1.05$\times$ & $9^{(0, 1)}$ \\
+ &  & \texttt{Coup-8} & 27 & 2.64$\times$ & $10$ &  &  & \texttt{Coup-8} & 539 & 1.42$\times$ & $9^{(0, 1)}$ \\
+ &  & \texttt{Coup-16} & 23 & 3.08$\times$ & $10$ &  &  & \texttt{Coup-16} & 649 & 1.18$\times$ & $10$ \\
+ &  & \texttt{G-TD} & \textbf{9} & 8.41$\times$ & $10$ &  &  & \texttt{G-TD} & \textbf{182} & 4.22$\times$ & $9^{(1, 0)}$ \\
+ &  & \texttt{G-Coup} & 9 & 8.28$\times$ & $10$ &  &  & \texttt{G-Coup} & 291 & 2.64$\times$ & $10$ \\
+\midrule
+\multirow{8}{*}{70} & \multirow{8}{*}{6} & DPA-TS & -- & -- & $0^{(0, 10)}$ & \multirow{8}{*}{70} & \multirow{8}{*}{7} & DPA-TS & -- & -- & $0^{(0, 10)}$ \\
+ &  & DPA-A & -- & -- & $0^{(0, 10)}$ &  &  & DPA-A & -- & -- & $0^{(0, 10)}$ \\
+ &  & Coup & 1549 & 1.00$\times$ & $5^{(0, 5)}$ &  &  & Coup & 1650 & 1.00$\times$ & $3^{(0, 7)}$ \\
+ &  & \texttt{Coup-4} & 1326 & 1.17$\times$ & $7^{(0, 3)}$ &  &  & \texttt{Coup-4} & 1391 & 1.19$\times$ & $4^{(0, 6)}$ \\
+ &  & \texttt{Coup-8} & 1008 & 1.54$\times$ & $7^{(0, 3)}$ &  &  & \texttt{Coup-8} & 1757 & 0.94$\times$ & $6^{(0, 4)}$ \\
+ &  & \texttt{Coup-16} & 862 & 1.80$\times$ & $7^{(0, 3)}$ &  &  & \texttt{Coup-16} & 1708 & 0.97$\times$ & $7^{(0, 3)}$ \\
+ &  & \texttt{G-TD} & \textbf{335} & 4.63$\times$ & $6^{(4, 0)}$ &  &  & \texttt{G-TD} & \textbf{372} & 4.44$\times$ & $3^{(7, 0)}$ \\
+ &  & \texttt{G-Coup} & 1010 & 1.53$\times$ & $10$ &  &  & \texttt{G-Coup} & 907 & 1.82$\times$ & $6^{(3, 1)}$ \\
+\bottomrule
+\end{tabular}
+}
+\label{tab:mokp_result}
+\end{table*}
+
+\begin{table*}[t]
+\centering
+\scriptsize
+\caption{MOSPP Pareto Enumeration Runtime Comparison Across Enumeration Methods}
+\resizebox{0.7\textwidth}{!}{%
+\begin{tabular}{rrlrrl|rrlrrl}
+\toprule
+N & K & Method & Time (S) & Speed-up & $S^{(M,T)}$ & N & K & Method & Time (S) & Speed-up & $S^{(M,T)}$ \\
+\midrule
+\multirow{8}{*}{150} & \multirow{8}{*}{3} & DPA-TS & 11 & 1.12$\times$ & $10$ & \multirow{8}{*}{150} & \multirow{8}{*}{4} & DPA-TS & 486 & 0.03$\times$ & $10$ \\
+ &  & DPA-A & 8 & 1.59$\times$ & $10$ &  &  & DPA-A & 420 & 0.04$\times$ & $10$ \\
+ &  & Coup & 12 & 1.00$\times$ & $10$ &  &  & Coup & 16 & 1.00$\times$ & $10$ \\
+ &  & \texttt{Coup-4} & 8 & 1.50$\times$ & $10$ &  &  & \texttt{Coup-4} & 10 & 1.54$\times$ & $10$ \\
+ &  & \texttt{Coup-8} & 8 & 1.50$\times$ & $10$ &  &  & \texttt{Coup-8} & 9 & 1.84$\times$ & $10$ \\
+ &  & \texttt{Coup-16} & 8 & 1.51$\times$ & $10$ &  &  & \texttt{Coup-16} & 7 & 2.16$\times$ & $10$ \\
+ &  & \texttt{G-TD} & 7 & 1.80$\times$ & $10$ &  &  & \texttt{G-TD} & 6 & 2.74$\times$ & $10$ \\
+ &  & \texttt{G-Coup} & \textbf{5} & 2.44$\times$ & $9^{(1, 0)}$ &  &  & \texttt{G-Coup} & \textbf{6} & 2.94$\times$ & $9^{(1, 0)}$ \\
+\midrule
+\multirow{8}{*}{150} & \multirow{8}{*}{5} & DPA-TS & 1929 & 0.02$\times$ & $5^{(0, 5)}$ & \multirow{8}{*}{150} & \multirow{8}{*}{6} & DPA-TS & 1052 & 0.04$\times$ & $1^{(0, 9)}$ \\
+ &  & DPA-A & 1807 & 0.02$\times$ & $5^{(0, 5)}$ &  &  & DPA-A & 1085 & 0.04$\times$ & $1^{(0, 9)}$ \\
+ &  & Coup & 34 & 1.00$\times$ & $10$ &  &  & Coup & 47 & 1.00$\times$ & $10$ \\
+ &  & \texttt{Coup-4} & 20 & 1.72$\times$ & $10$ &  &  & \texttt{Coup-4} & 26 & 1.86$\times$ & $10$ \\
+ &  & \texttt{Coup-8} & 18 & 1.89$\times$ & $10$ &  &  & \texttt{Coup-8} & 22 & 2.16$\times$ & $10$ \\
+ &  & \texttt{Coup-16} & 16 & 2.11$\times$ & $10$ &  &  & \texttt{Coup-16} & 21 & 2.32$\times$ & $10$ \\
+ &  & \texttt{G-TD} & \textbf{10} & 3.35$\times$ & $10$ &  &  & \texttt{G-TD} & \textbf{6} & 8.42$\times$ & $10$ \\
+ &  & \texttt{G-Coup} & 11 & 3.17$\times$ & $10$ &  &  & \texttt{G-Coup} & 7 & 6.76$\times$ & $10$ \\
+\midrule
+\multirow{8}{*}{150} & \multirow{8}{*}{7} & DPA-TS & -- & -- & $0^{(0, 10)}$ & \multirow{8}{*}{200} & \multirow{8}{*}{3} & DPA-TS & 32 & 5.15$\times$ & $10$ \\
+ &  & DPA-A & -- & -- & $0^{(0, 10)}$ &  &  & DPA-A & \textbf{22} & 7.53$\times$ & $10$ \\
+ &  & Coup & 184 & 1.00$\times$ & $10$ &  &  & Coup & 162 & 1.00$\times$ & $1^{(9, 0)}$ \\
+ &  & \texttt{Coup-4} & 84 & 2.20$\times$ & $10$ &  &  & \texttt{Coup-4} & 93 & 1.75$\times$ & $1^{(9, 0)}$ \\
+ &  & \texttt{Coup-8} & 71 & 2.61$\times$ & $10$ &  &  & \texttt{Coup-8} & 87 & 1.86$\times$ & $1^{(9, 0)}$ \\
+ &  & \texttt{Coup-16} & 96 & 1.91$\times$ & $10$ &  &  & \texttt{Coup-16} & 72 & 2.27$\times$ & $1^{(8, 1)}$ \\
+ &  & \texttt{G-TD} & \textbf{9} & 20.88$\times$ & $10$ &  &  & \texttt{G-TD} & -- & -- & $0^{(10, 0)}$ \\
+ &  & \texttt{G-Coup} & 17 & 10.98$\times$ & $10$ &  &  & \texttt{G-Coup} & -- & -- & $0^{(10, 0)}$ \\
+\midrule
+\multirow{8}{*}{200} & \multirow{8}{*}{4} & DPA-TS & 913 & 0.20$\times$ & $10$ &  &  &  &  &  &  \\
+ &  & DPA-A & 793 & 0.23$\times$ & $10$ &  &  &  &  &  &  \\
+ &  & Coup & 186 & 1.00$\times$ & $1^{(9, 0)}$ &  &  &  &  &  &  \\
+ &  & \texttt{Coup-4} & 80 & 2.34$\times$ & $1^{(9, 0)}$ &  &  &  &  &  &  \\
+ &  & \texttt{Coup-8} & 63 & 2.97$\times$ & $1^{(9, 0)}$ &  &  &  &  &  &  \\
+ &  & \texttt{Coup-16} & \textbf{45} & 4.12$\times$ & $1^{(9, 0)}$ &  &  &  &  &  &  \\
+ &  & \texttt{G-TD} & -- & -- & $0^{(10, 0)}$ &  &  &  &  &  &  \\
+ &  & \texttt{G-Coup} & -- & -- & $0^{(10, 0)}$ &  &  &  &  &  &  \\
+\bottomrule
+\end{tabular}
+}
+\label{tab:mospp_result}
+\end{table*}
+
+\begin{table*}[t]
+\centering
+\scriptsize
+\caption{MOTSP Pareto Enumeration Runtime Comparison Across Enumeration Methods}
+\resizebox{0.7\textwidth}{!}{%
+\begin{tabular}{rrlrrl|rrlrrl}
+\toprule
+N & K & Method & Time (S) & Speed-up & $S^{(M,T)}$ & N & K & Method & Time (S) & Speed-up & $S^{(M,T)}$ \\
+\midrule
+\multirow{8}{*}{15} & \multirow{8}{*}{4} & DPA-TS & -- & -- & $0^{(0, 10)}$ & \multirow{8}{*}{15} & \multirow{8}{*}{5} & DPA-TS & -- & -- & $0^{(0, 10)}$ \\
+ &  & DPA-A & -- & -- & $0^{(0, 10)}$ &  &  & DPA-A & -- & -- & $0^{(0, 10)}$ \\
+ &  & Coup & 23 & 1.00$\times$ & $10$ &  &  & Coup & 335 & 1.00$\times$ & $10$ \\
+ &  & \texttt{Coup-4} & 7 & 3.47$\times$ & $10$ &  &  & \texttt{Coup-4} & 115 & 2.92$\times$ & $10$ \\
+ &  & \texttt{Coup-8} & 5 & 5.06$\times$ & $10$ &  &  & \texttt{Coup-8} & 82 & 4.11$\times$ & $10$ \\
+ &  & \texttt{Coup-16} & 3 & 7.83$\times$ & $10$ &  &  & \texttt{Coup-16} & 67 & 5.05$\times$ & $10$ \\
+ &  & \texttt{G-TD} & 3 & 7.50$\times$ & $10$ &  &  & \texttt{G-TD} & \textbf{36} & 9.44$\times$ & $9^{(1, 0)}$ \\
+ &  & \texttt{G-Coup} & \textbf{3} & 8.03$\times$ & $10$ &  &  & \texttt{G-Coup} & 48 & 7.04$\times$ & $10$ \\
+\midrule
+\multirow{8}{*}{15} & \multirow{8}{*}{6} & DPA-TS & -- & -- & $0^{(0, 10)}$ & \multirow{8}{*}{15} & \multirow{8}{*}{7} & DPA-TS & -- & -- & $0^{(0, 10)}$ \\
+ &  & DPA-A & -- & -- & $0^{(0, 10)}$ &  &  & DPA-A & -- & -- & $0^{(0, 10)}$ \\
+ &  & Coup & 1623 & 1.00$\times$ & $9^{(0, 1)}$ &  &  & Coup & 3544 & 1.00$\times$ & $1^{(0, 9)}$ \\
+ &  & \texttt{Coup-4} & 870 & 1.87$\times$ & $10$ &  &  & \texttt{Coup-4} & 2508 & 1.41$\times$ & $3^{(0, 7)}$ \\
+ &  & \texttt{Coup-8} & 711 & 2.28$\times$ & $10$ &  &  & \texttt{Coup-8} & 2123 & 1.67$\times$ & $3^{(0, 7)}$ \\
+ &  & \texttt{Coup-16} & 641 & 2.53$\times$ & $10$ &  &  & \texttt{Coup-16} & 1930 & 1.84$\times$ & $3^{(0, 7)}$ \\
+ &  & \texttt{G-TD} & -- & -- & $0^{(10, 0)}$ &  &  & \texttt{G-TD} & -- & -- & $0^{(10, 0)}$ \\
+ &  & \texttt{G-Coup} & \textbf{369} & 4.40$\times$ & $10$ &  &  & \texttt{G-Coup} & \textbf{1828} & 1.94$\times$ & $6^{(3, 1)}$ \\
+\bottomrule
+\end{tabular}
+}
+\label{tab:motsp_result}
+\end{table*}
+
 
 
 \end{document}
