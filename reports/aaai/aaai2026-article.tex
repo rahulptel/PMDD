@@ -214,20 +214,17 @@ The GPU implementation follows the same enumeration logic as Algorithm~\ref{alg:
 \State Transfer all packed arrays to GPU global memory
 \EndProcedure
 
-\Procedure{ExpandLayerTopDown}{$\mathcal{Y}^{\downarrow}, j$}
-    \State $\kappa, \phi^c, \Gamma \gets$ \Call{ComputeArcOffsets}{$\mathcal{Y}^{\downarrow}, b^{\downarrow}, \phi^{a,\downarrow}$}
-    \State $\beta \gets$ \Call{ExpandCandidates}{$\mathcal{Y}^{\downarrow}, b^{\downarrow}, \mathbf{v}^{\downarrow}, \phi^c, \kappa$}
+\Procedure{ExpandLayer}{$\mathcal{Y}, j, d$}
+    \If{$d = \downarrow$}
+        \State $(b,\mathbf{v},\phi^a) \gets (b^{\downarrow},\mathbf{v}^{\downarrow},\phi^{a,\downarrow})$
+    \Else
+        \State $(b,\mathbf{v},\phi^a) \gets (b^{\uparrow},\mathbf{v}^{\uparrow},\phi^{a,\uparrow})$
+    \EndIf
+    \State $\kappa, \phi^c, \Gamma \gets$ \Call{ComputeArcOffsets}{$\mathcal{Y}, b, \phi^a$}
+    \State $\beta \gets$ \Call{ExpandCandidates}{$\mathcal{Y}, b, \mathbf{v}, \phi^c, \kappa$}
     \State $\sigma \gets$ \Call{FilterDominated}{$\beta, \Gamma$}
-    \State $\mathcal{Y}^{\downarrow} \gets$ \Call{CompactSurvivors}{$\beta, \sigma$}
-    \State \Return $\mathcal{Y}^{\downarrow}$
-\EndProcedure
-
-\Procedure{ExpandLayerBottomUp}{$\mathcal{Y}^{\uparrow}, j$}
-    \State $\kappa, \phi^c, \Gamma \gets$ \Call{ComputeArcOffsets}{$\mathcal{Y}^{\uparrow}, b^{\uparrow}, \phi^{a,\uparrow}$}
-    \State $\beta \gets$ \Call{ExpandCandidates}{$\mathcal{Y}^{\uparrow}, b^{\uparrow}, \mathbf{v}^{\uparrow}, \phi^c, \kappa$}
-    \State $\sigma \gets$ \Call{FilterDominated}{$\beta, \Gamma$}
-    \State $\mathcal{Y}^{\uparrow} \gets$ \Call{CompactSurvivors}{$\beta, \sigma$}
-    \State \Return $\mathcal{Y}^{\uparrow}$
+    \State $\mathcal{Y} \gets$ \Call{CompactSurvivors}{$\beta, \sigma$}
+    \State \Return $\mathcal{Y}$
 \EndProcedure
 
 \State \Call{FlattenDD}{$\mathcal{D}$}
@@ -237,11 +234,11 @@ The GPU implementation follows the same enumeration logic as Algorithm~\ref{alg:
 \While{$i_{\text{td}} \neq i_{\text{bu}}$}
     \If{$s_{\text{td}} \le s_{\text{bu}}$} \Comment{Expand top-down}
         \State $i_{\text{td}} \gets i_{\text{td}} + 1$
-        \State $\mathcal{Y}^{\downarrow} \gets \textsc{ExpandLayerTopDown}(\mathcal{Y}^{\downarrow}, i_{\text{td}})$
+        \State $\mathcal{Y}^{\downarrow} \gets \textsc{ExpandLayer}(\mathcal{Y}^{\downarrow}, i_{\text{td}}, \downarrow)$
         \State $s_{\text{td}} \gets \textsc{ComputeScore}(\mathcal{Y}^{\downarrow}, i_{\text{td}})$
     \Else \Comment{Expand bottom-up}
         \State $i_{\text{bu}} \gets i_{\text{bu}} - 1$
-        \State $\mathcal{Y}^{\uparrow} \gets \textsc{ExpandLayerBottomUp}(\mathcal{Y}^{\uparrow}, i_{\text{bu}})$
+        \State $\mathcal{Y}^{\uparrow} \gets \textsc{ExpandLayer}(\mathcal{Y}^{\uparrow}, i_{\text{bu}}, \uparrow)$
         \State $s_{\text{bu}} \gets 1.5 \times \textsc{ComputeScore}(\mathcal{Y}^{\uparrow}, i_{\text{bu}})$
     \EndIf
 \EndWhile
