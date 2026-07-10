@@ -1,10 +1,10 @@
 # Parallel Multiobjective Decision Diagrams
 
-Parallel Multiobjective Decision Diagrams, or
-`PMDD`, is a C++ research codebase for exact multiobjective optimization
-with decision diagrams. It builds binary decision diagrams (BDDs) or multivalued
-decision diagrams (MDDs), then enumerates the Pareto frontier with CPU
-algorithms and selected CUDA implementations.
+Parallel Multiobjective Decision Diagrams (`PMDD`) computes exact Pareto frontiers
+for multiobjective optimization by combining decision-diagram representations
+with parallel frontier enumeration. Supported problem classes are represented as
+binary or multivalued decision diagrams, and the enumeration algorithms run on
+parallel CPU and GPU backends.
 
 The active parallel decision-diagram implementation now lives under `src/pmdd`.
 Baseline implementations used for comparison live under `src/baseline`.
