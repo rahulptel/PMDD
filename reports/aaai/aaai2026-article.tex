@@ -1,5 +1,5 @@
 \documentclass[letterpaper]{article}
-\usepackage{aaai2026}
+\usepackage[submission]{aaai2026}
 \usepackage{times}
 \usepackage{helvet}
 \usepackage{courier}
@@ -29,7 +29,7 @@
 \usepackage{multirow}
 
 % \title{Parallel Decision Diagrams-based Multiobjective Discrete Optimization} %TODO Please add
-\title{Parallel Decision Diagram-based Multiobjective Discrete Optimization} %TODO Please add
+\title{Parallel Multiobjective Decision Diagrams} %TODO Please add
 
 % \title{\method{}: GPU-Accelerated Multiobjective Discrete Optimization using Decision Diagrams} %TODO Please add
 
@@ -48,12 +48,16 @@ rm.patel@mail.utoronto.ca, elias.khalil@utoronto.ca
 
 \maketitle
 
-%TODO mandatory: add short abstract of the document
 \begin{abstract}
-Decision diagrams (DDs) are an effective exact framework for multiobjective discrete optimization because they enable Pareto frontier (PF) enumeration over a compact dynamic-programming representation of the feasible set. Existing DD-based PF enumeration algorithms, however, are serial, even though their dominant operations expose substantial parallelism. This paper presents parallel CPU and GPU implementations of exact DD-based PF enumeration. The proposed implementations preserve the bidirectional enumeration model while parallelizing layer expansion, candidate-label generation, dominance filtering, cutset-product materialization, and frontier merging. We evaluate the methods on benchmark instances of the multiobjective knapsack, set packing, and traveling salesperson problems with up to seven objectives, comparing against both a state-of-the-art MIP approach and the state-of-the-art serial DD implementation. DD-based enumeration is more robust than the MIP baseline on MOKP and MOTSP, while the MIP baseline remains competitive on some lower-objective MOSPP instances. Relative to serial DD enumeration, the parallel CPU variants achieve speedups of up to $7.83\times$, and the GPU variants achieve speedups of up to $20.88\times$ when intermediate frontiers fit in GPU memory.
-The code is available at \url{https://anonymous.4open.science/r/PDD}.
+Decision diagrams (DDs) can efficiently enumerate the exact Pareto frontier (PF) for multiobjective discrete optimization problems with a compact dynamic programming formulation.
+However, existing DD-based PF enumeration algorithms are serial, presenting significant opportunities for parallelization.
+In this work, we first identify the core serial operations amenable to parallelization, such as layer expansion, candidate-label generation, dominance filtering, cutset-product materialization, and frontier merging.
+We then develop efficient parallel implementations of these operations, tailored to CPU and GPU architectures, to accelerate enumeration.
+Finally, we evaluate our methods on benchmark instances of the multiobjective knapsack, set packing, and traveling salesperson problems with up to seven objectives, comparing against a state-of-the-art MIP approach and the state-of-the-art serial DD implementation.
+DD-based enumeration proves more robust than the MIP baseline on MOKP and MOTSP, though the MIP baseline remains competitive on some lower-objective MOSPP instances.
+Relative to serial DD enumeration, our parallel CPU variants achieve speedups of up to $7.83\times$, while GPU variants reach up to $20.88\times$ when intermediate frontiers fit in GPU memory.
+Code is available at \url{https://anonymous.4open.science/r/DD-C683/}.
 \end{abstract}
-
 
 \section{Introduction}
 Multiobjective discrete optimization (MODO) \cite{ehrgott2005multicriteria,ehrgott2016exact,miettinen1999nonlinear} problems arise when feasible decisions must be evaluated under several conflicting criteria. Although problem-specific heuristics \cite{Vianna2014AMG} and evolutionary methods \cite{Deb2002AFA} are widely used, exact enumeration of the Pareto frontier (PF) remains important when all trade-offs must be certified. Decision diagrams (DDs) \cite{Cir2018DecisionDF} provide an effective exact framework for discrete problems with a dynamic-programming structure. An exact DD compactly represents the feasible set as a layered acyclic graph; PF enumeration can then be performed by propagating nondominated labels through this graph. Recent DD-based methods have shown strong performance on MODO instances with several objectives and tens to hundreds of decision variables \cite{bergman2022network}.
@@ -320,7 +324,7 @@ The CPU variants provide consistent but bounded speedups over serial DD enumerat
 \paragraph{RQ3 (Parallel DD on CPU vs. GPU).}
 The GPU variants are often fastest when the intermediate frontiers fit in GPU memory, but they are less robust than the CPU variants. On MOKP, GPU methods dominate the small $N=40$ settings, with \texttt{G-Coup} reaching $5.51\times$ and $9.71\times$ speedups; for $N=70$, \texttt{G-TD} is fastest on solved instances but incurs GPU out-of-memory failures. On MOSPP, GPU performance is strong for $N=150$, including a $20.88\times$ speedup for \texttt{G-TD} at $(150,7)$, but both GPU variants fail due to memory on the reported $N=200$ settings. On MOTSP, GPU methods are competitive with or faster than the CPU variants, especially for $K=5,6$, but memory failures appear for \texttt{G-TD} at higher $K$ and for \texttt{G-Coup} at $K=7$. Overall, the GPU gives the largest speedups, while the parallel CPU variants are more reliable under the imposed memory limits. Full tables for all reported instance sizes are provided in \Cref{app:additional_results}.
 
-\begin{table*}[t]
+\begin{table*}[htbp!]
 \centering
 \scriptsize
 \renewcommand{\arraystretch}{0.97}
@@ -389,7 +393,6 @@ N & K & Method & Time (s) & Speed-up & $S^{(M,T)}$ \\
 }
 \label{tab:combined_result_short}
 \end{table*}
-\clearpage
 
 \section{Related Work}
 \label{sec:related}
@@ -397,7 +400,7 @@ Our work is related to two lines of research: exact algorithms for multiobjectiv
 
 \subsection{Exact Multiobjective Discrete Optimization}
 \label{sec:related_exact}
-Exact algorithms for multiobjective discrete optimization are commonly divided into criterion-space, decision-space, and dynamic-programming or state-space approaches; see \citet{ehrgott2016exact,halffmann2022exact} for surveys. Criterion-space methods enumerate nondominated points by repeatedly solving scalarized or constrained single-objective subproblems while partitioning the unexplored objective space. Representative examples include recursive and box-decomposition schemes \citep{ozlen2009multi,ozlen2014multi,boland2015criterion}, parameter-space search \citep{kirlik2014new}, and recent objective-space algorithms for multiobjective integer programming \citep{dachert2024simple,tamby2020generic}. Decision-space methods instead generalize branch-and-bound or branch-and-cut to vector-valued bounds and dominance-based fathoming \citep{jozefowiez2012generic,przybylski2017multi,parragh2019branch,adelgren2022branch}.
+Exact algorithms for multiobjective discrete optimization are commonly divided into criterion-space, decision-space, and dynamic-programming or state-space approaches; see \citet{ehrgott2016exact,halffmann2022exact} for surveys. Criterion-space methods enumerate nondominated points by repeatedly solving scalarized or constrained single-objective subproblems while partitioning the unexplored objective space. Representative examples include recursive and box-decomposition schemes \citep{ozlen2009multi,ozlen2014multi,boland2015criterion}, parameter-space search \citep{kirlik2014new}, and recent objective-space algorithms for multiobjective integer programming \citep{dachert2024simple,tamby2021enumeration}. Decision-space methods instead generalize branch-and-bound or branch-and-cut to vector-valued bounds and dominance-based fathoming.
 
 Dynamic-programming and state-space methods propagate sets of nondominated labels through a recursive model. Decision diagrams belong to this family. \citet{cire2016multiobjective} introduced multiobjective optimization by DDs, and \citet{bergman2022network} developed network models and reduction operations that make exact Pareto frontier enumeration competitive when a compact DD representation is available. Our work builds on this DD-based state-space approach. We do not change the exact enumeration model; instead, we parallelize its dominant operations: label generation, dominance filtering, cutset-product materialization, and frontier merging.
 
