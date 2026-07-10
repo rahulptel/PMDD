@@ -50,33 +50,27 @@ rm.patel@mail.utoronto.ca, elias.khalil@utoronto.ca
 
 %TODO mandatory: add short abstract of the document
 \begin{abstract}
-Decision diagrams (DDs) have recently emerged as a state-of-the-art technique for solving multiobjective discrete optimization problems by quickly enumerating their Pareto frontier (PF). Existing implementations rely on serial algorithms for PF enumeration, where the primary computational bottleneck arises from repeatedly performing dominance filtering at each node of the DD.
-% However, dominance filtering can be parallelized to accelerate the enumeration further.
-This work studies the impact of parallelizing dominance filtering on PF enumeration time. We evaluate the parallel algorithms on benchmark instances of the multiobjective knapsack, set packing, and traveling salesperson problems.
-Across instance sizes, the maximum speed-up achieved by a GPU variant is $7.49\times$ for MOKP, $15.08\times$ for MOSPP, and $13.60\times$ for MOTSP relative to the state-of-the-art serial implementation.
-The maximum speed-up achieved by the best parallel CPU variant is $3.36\times$ for MOKP, $2.68\times$ for MOSPP, and $5.75\times$ for MOTSP relative to the same baseline, with the caveat that it is able to solve more instances than the GPU variant.
+Decision diagrams (DDs) are an effective exact framework for multiobjective discrete optimization because they enable Pareto frontier (PF) enumeration over a compact dynamic-programming representation of the feasible set. Existing DD-based PF enumeration algorithms, however, are serial, even though their dominant operations expose substantial parallelism. This paper presents parallel CPU and GPU implementations of exact DD-based PF enumeration. The proposed implementations preserve the bidirectional enumeration model while parallelizing layer expansion, candidate-label generation, dominance filtering, cutset-product materialization, and frontier merging. We evaluate the methods on benchmark instances of the multiobjective knapsack, set packing, and traveling salesperson problems with up to seven objectives, comparing against both a state-of-the-art MIP approach and the state-of-the-art serial DD implementation. DD-based enumeration is more robust than the MIP baseline on MOKP and MOTSP, while the MIP baseline remains competitive on some lower-objective MOSPP instances. Relative to serial DD enumeration, the parallel CPU variants achieve speedups of up to $7.83\times$, and the GPU variants achieve speedups of up to $20.88\times$ when intermediate frontiers fit in GPU memory.
 The code is available at \url{https://anonymous.4open.science/r/PDD}.
 \end{abstract}
 
 
 \section{Introduction}
-Multiobjective discrete optimization (MODO) \cite{ehrgott2005multicriteria,ehrgott2016exact,miettinen1999nonlinear} problems arise naturally in many applications where conflicting criteria need to be considered simultaneously in conjunction with constraints and integer variables. While problem-specific \cite{Vianna2014AMG} and generic evolutionary heuristics \cite{Deb2002AFA} have been developed for this problem class, recovering the exact Pareto frontier (PF) is desirable in critical applications such as healthcare, finance, and infrastructure planning. Over the past decade, decision diagrams (DDs) \cite{Cir2018DecisionDF} have gained traction as an effective framework for solving discrete problems that can be cast in the language of dynamic programming. As a data structure, the DD is an implicit representation of all feasible solutions to a problem. Naturally, one can enumerate the subset of such feasible solutions that are Pareto-optimal by using the multicriteria-shortest path algorithm on the network represented by a DD~\cite{garroppo2010survey}. This approach has been shown to be quite efficient in practice, yielding exact Pareto frontiers rather quickly for problems with 2-7 objectives and tens to hundreds of decision variables \cite{bergman2022network}.
+Multiobjective discrete optimization (MODO) \cite{ehrgott2005multicriteria,ehrgott2016exact,miettinen1999nonlinear} problems arise when feasible decisions must be evaluated under several conflicting criteria. Although problem-specific heuristics \cite{Vianna2014AMG} and evolutionary methods \cite{Deb2002AFA} are widely used, exact enumeration of the Pareto frontier (PF) remains important when all trade-offs must be certified. Decision diagrams (DDs) \cite{Cir2018DecisionDF} provide an effective exact framework for discrete problems with a dynamic-programming structure. An exact DD compactly represents the feasible set as a layered acyclic graph; PF enumeration can then be performed by propagating nondominated labels through this graph. Recent DD-based methods have shown strong performance on MODO instances with several objectives and tens to hundreds of decision variables \cite{bergman2022network}.
 
-Despite the success of DD-based solvers, extracting the exact Pareto frontier remains computationally demanding. The primary bottleneck lies in the state-space expansion, specifically the localized Pareto dominance filtering performed at each node to discard suboptimal labels. Because dominance checking requires pairwise comparisons among all candidate labels at a node, its worst-case time complexity grows quadratically with the size of the node frontiers. As the number of objectives or the size of the problem increases, this filtering step becomes the bottleneck, limiting the applicability of serial DD solvers.
+The remaining bottleneck is computational rather than representational. During enumeration, each DD node stores a nondominated set of labels associated with partial paths through that node. Expanding a layer generates candidate labels, merges them into node frontiers, and repeatedly applies Pareto dominance filtering. These operations are local to nodes or to cutset frontiers, but they can be expensive: dominance filtering involves many pairwise vector comparisons, and the final bidirectional merge requires products of root-side and terminal-side node frontiers. In existing DD-based MODO solvers, these operations are executed serially.
 
-Simultaneously, the proliferation of graphics processing units (GPUs) due to the rise of deep learning has prompted optimization researchers to reconsider classical algorithms and attempt to parallelize them for improved scalability \cite{ben2019demystifying}. GPUs are throughput-oriented processors designed to execute thousands of concurrent threads. The massive amount of independent, pairwise vector comparisons required during dominance filtering makes this specific bottleneck highly amenable to the \emph{Single Instruction Multiple Thread} (SIMT) architecture of GPUs.
+This paper studies how to parallelize exact DD-based PF enumeration without changing the underlying enumeration model. The key observation is that the expensive work in bidirectional PF enumeration decomposes at multiple granularities. Layer expansion can be distributed over nodes; candidate generation and dominance checks can be distributed over labels; and the final cutset merge can be organized as a parallel reduction over nondominated sets. These forms of parallelism map differently to multi-core CPUs and GPUs. CPUs are effective for node-level work sharing and tree-structured frontier reduction, whereas GPUs can expose finer-grained parallelism by materializing candidates in flat buffers and filtering them with data-parallel kernels.
 
-To address this computational bottleneck, we introduce the first parallel DD-based framework for MODO. Through a careful analysis of the PF enumeration process, we identify opportunities for both node-level and candidate-level parallel computation. We propose static and dynamic resource allocation schemes that take into account the nature of the hardware being used (central processing unit (CPU) or GPU) to efficiently balance the varying workloads across the DD layers.
-
-The main contributions of this paper are summarized as follows:
+We make the following contributions:
 \begin{itemize}
-    \item We present the first parallel algorithm for exact PF enumeration on DDs, identifying key opportunities for concurrent state expansion and dominance filtering.
-    \item We design and implement novel static and dynamic memory and thread allocation schemes tailored for both multi-core CPUs and massively parallel GPUs, effectively mitigating the hazards of data races and synchronization overhead.
-    \item We conduct extensive computational experiments on benchmark instances of the multiobjective knapsack, set packing, and traveling salesperson problems with up to seven objectives.
-    \item We demonstrate that our parallelization schemes achieve substantial reductions in wall-clock time compared to the state-of-the-art serial enumeration baseline, achieving speedups of up to X$\times$ on CPUs and Y$\times$ on GPUs.
+    \item We identify the parallel work in DD-based bidirectional PF enumeration, including layer expansion, label generation, dominance filtering, cutset-product materialization, and nondominated-set reduction.
+    \item We develop CPU and GPU implementations of exact DD-based PF enumeration. The CPU implementation uses dynamic node scheduling and a tree reduction for the cutset merge; the GPU implementation uses flat candidate buffers, prefix-sum offsets, load-balanced dominance filtering, and batched cutset merging.
+    \item We evaluate the implementations on benchmark instances of the multiobjective knapsack, set packing, and traveling salesperson problems with up to seven objectives.
+    \item We show that DD-based enumeration is competitive with a state-of-the-art MIP approach and that parallel DD-based enumeration can substantially reduce wall-clock time relative to the state-of-the-art serial DD baseline. The GPU variants provide the largest speedups when intermediate frontiers fit in memory, while the CPU variants provide more robust performance under the imposed memory limits.
 \end{itemize}
 
-The remainder of this paper is organized as follows. \Cref{sec:prelim} provides the necessary background on MODO and DDs. \Cref{sec:method} details our parallel enumeration methodology and resource allocation schemes. \Cref{sec:results} presents the computational evaluation across various problem classes. The related work is provided in \Cref{sec:related}. Finally, \Cref{sec:conclusion} concludes the paper and discusses avenues for future work.
+The remainder of this paper is organized as follows. \Cref{sec:prelim} provides background on MODO and DDs. \Cref{sec:method} describes the parallel enumeration methodology. \Cref{sec:results} presents the computational evaluation. \Cref{sec:related} reviews related work. \Cref{sec:conclusion} concludes the paper.
 
 \section{Preliminaries}
 \label{sec:prelim}
@@ -292,6 +286,7 @@ Batching does not change the set being computed. After each batch is processed, 
 \end{algorithm}
 
 \section{Computational Experiments}
+\label{sec:results}
 Our computational evaluation aims to answer the following key research questions:
 \begin{list}{\textbf{RQ\arabic{enumi}}}{%
     \usecounter{enumi}
@@ -412,6 +407,7 @@ Parallel computing has long been used to accelerate exact discrete optimization 
 More recent work has explored accelerator hardware. GPU implementations have been proposed for parts of simplex and linear-programming solvers \citep{lalami2011gpu,ploskas2016gpu,shin2025madipm}, and GPU-native first-order methods have shown strong performance on large-scale linear programs \citep{applegate2021practical,lu2025cupdlp,lu2023cupdlpc,lu2025cupdlpx}. For mixed-integer programming, GPU acceleration is harder because search trees are irregular; existing approaches typically keep the tree control on the CPU and offload selected kernels or heuristics to the GPU \citep{boyer2017gpu,ccorduk2025gpu}. Closest to our setting is the GPU-accelerated state expansion framework for anytime exact DD search of \citet{tardivo2026gpu}. In contrast, we study exact Pareto frontier enumeration on DDs, where the main parallel kernels are not tree-node relaxations but label generation, pairwise dominance filtering, and nondominated-set reduction.
 
 \section{Conclusion and Future Work}
+\label{sec:conclusion}
 Better memory management and parallelization strategies are crucial for scaling exact multiobjective discrete optimization algorithms to larger problem instances. Our work demonstrates that GPU acceleration can significantly reduce the runtime of Pareto frontier enumeration, particularly for instances where intermediate frontiers fit within GPU memory. However, memory limitations remain a challenge, and future research should explore more efficient memory management techniques, such as dynamic memory allocation and compression strategies, to further enhance the scalability of GPU-based methods. Additionally, investigating hybrid CPU-GPU approaches may yield further performance improvements by leveraging the strengths of both architectures.
 
 \bibliography{references}
@@ -641,7 +637,15 @@ The CPU implementation uses the tree reduction in \Cref{alg:cpu_tree_reduction} 
 
 The GPU implementation expands each selected layer through the four-kernel pipeline described in \Cref{sec:gpu_impl_rewrite}. \Cref{alg:compute_arc_offsets} computes per-arc candidate counts and buffer offsets. \Cref{alg:expand_candidates} then materializes shifted candidate labels in the assigned buffer segments. \Cref{alg:dynamic_1D_kernel} performs load-balanced dominance filtering, and \Cref{alg:compact_survivors} compacts the surviving labels into the next node-frontier representation. Finally, \Cref{alg:materialize_cutset_products} materializes the batched cutset products used by \Cref{alg:gpu_cutset_merge}.
 
-\begin{algorithm}[htbp]
+
+\Cref{alg:expand_candidates} uses the offsets from \Cref{alg:compute_arc_offsets} to write every generated candidate into a disjoint location of the flat buffer.
+\Cref{alg:dynamic_1D_kernel} assigns more thread blocks to nodes with larger candidate segments, so the dominance-filtering work is balanced at the level of node-frontier size.
+\Cref{alg:compact_survivors} converts the binary survivor flags produced by the dominance kernel into compacted node-frontier storage.
+\Cref{alg:materialize_cutset_products} is used during the batched cutset merge. It materializes the Cartesian products for a batch of active cutset nodes before filtering and merging them into the running global frontier.
+
+
+
+\begin{algorithm}[t!]
 \caption{Compute Candidate Offsets}
 \label{alg:compute_arc_offsets}
 \begin{algorithmic}[1]
@@ -665,9 +669,8 @@ The GPU implementation expands each selected layer through the four-kernel pipel
 \end{algorithmic}
 \end{algorithm}
 
-\Cref{alg:expand_candidates} uses the offsets from \Cref{alg:compute_arc_offsets} to write every generated candidate into a disjoint location of the flat buffer.
 
-\begin{algorithm}[htbp]
+\begin{algorithm}[htbp!]
 \caption{Materialize Layer Candidates}
 \label{alg:expand_candidates}
 \begin{algorithmic}[1]
@@ -685,9 +688,50 @@ The GPU implementation expands each selected layer through the four-kernel pipel
 \end{algorithmic}
 \end{algorithm}
 
-\Cref{alg:dynamic_1D_kernel} assigns more thread blocks to nodes with larger candidate segments, so the dominance-filtering work is balanced at the level of node-frontier size.
 
-\begin{algorithm}[htbp]
+\begin{algorithm}[htbp!]
+\caption{Compact Node Frontiers}
+\label{alg:compact_survivors}
+\begin{algorithmic}[1]
+\Require Candidate buffer $\beta$ of size $S$; binary survivor flags $\sigma[]$
+\Procedure{CompactSurvivors}{$\beta, \sigma$}
+\State $\rho_0 \gets 0$
+\For{$i = 1$ \textbf{to} $S$} \Comment{Parallel prefix sum on GPU}
+    \State $\rho_i \gets \rho_{i-1} + \sigma_{i-1}$
+\EndFor
+\ForAll{candidates $i = 0$ \textbf{to} $S-1$ \textbf{in parallel on GPU}} \Comment{One thread per candidate}
+    \If{$\sigma_i = 1$}
+        \State $\mathcal{Y}(v)[\,\rho_i\,] \gets \beta[i]$ \Comment{$v$: destination node of $i$}
+    \EndIf
+\EndFor
+\State \Return $\mathcal{Y}$
+\EndProcedure
+\end{algorithmic}
+\end{algorithm}
+
+
+
+\begin{algorithm}[htbp!]
+\caption{Materialize Cutset Products}
+\label{alg:materialize_cutset_products}
+\begin{algorithmic}[1]
+\Require Frontiers $\mathcal{Y}^{\downarrow}$, $\mathcal{Y}^{\uparrow}$; node offsets $\phi^{\downarrow}$, $\phi^{\uparrow}$ and sizes $\kappa^{\downarrow}$, $\kappa^{\uparrow}$ for nodes in batch $\mathcal{B}$; product offsets $\phi^p$
+\Procedure{MaterializeProducts}{$\mathcal{Y}^{\downarrow}, \mathcal{Y}^{\uparrow}, \mathcal{B}$}
+\State Allocate flat candidate buffer $\beta$ of size $\sum_{v \in \mathcal{B}} \kappa^{\downarrow}_v \cdot \kappa^{\uparrow}_v$
+\ForAll{nodes $v \in \mathcal{B}$ \textbf{in parallel on GPU}} \Comment{One thread block per node}
+    \State $T \gets \kappa^{\downarrow}_v \cdot \kappa^{\uparrow}_v$ \Comment{Total candidates for node $v$}
+    \ForAll{candidate indices $p = 0, \dots, T-1$ \textbf{in parallel}}
+        \State $i \gets \lfloor p / \kappa^{\uparrow}_v \rfloor$; \quad $j \gets p \pmod{\kappa^{\uparrow}_v}$
+        \State $y^{\downarrow} \gets \mathcal{Y}^{\downarrow}(\phi^{\downarrow}_v + i)$; \quad $y^{\uparrow} \gets \mathcal{Y}^{\uparrow}(\phi^{\uparrow}_v + j)$
+        \State $\beta[\,\phi^p_v + p\,] \gets y^{\downarrow} + y^{\uparrow}$
+    \EndFor
+\EndFor
+\State \Return $\beta$
+\EndProcedure
+\end{algorithmic}
+\end{algorithm}
+
+\begin{algorithm}[t]
 \caption{Load-Balanced GPU Dominance Filter}
 \label{alg:dynamic_1D_kernel}
 \begin{algorithmic}[1]
@@ -724,61 +768,19 @@ The GPU implementation expands each selected layer through the four-kernel pipel
 \end{algorithmic}
 \end{algorithm}
 
-\Cref{alg:compact_survivors} converts the binary survivor flags produced by the dominance kernel into compacted node-frontier storage.
-
-\begin{algorithm}[htbp]
-\caption{Compact Node Frontiers}
-\label{alg:compact_survivors}
-\begin{algorithmic}[1]
-\Require Candidate buffer $\beta$ of size $S$; binary survivor flags $\sigma[]$
-\Procedure{CompactSurvivors}{$\beta, \sigma$}
-\State $\rho_0 \gets 0$
-\For{$i = 1$ \textbf{to} $S$} \Comment{Parallel prefix sum on GPU}
-    \State $\rho_i \gets \rho_{i-1} + \sigma_{i-1}$
-\EndFor
-\ForAll{candidates $i = 0$ \textbf{to} $S-1$ \textbf{in parallel on GPU}} \Comment{One thread per candidate}
-    \If{$\sigma_i = 1$}
-        \State $\mathcal{Y}(v)[\,\rho_i\,] \gets \beta[i]$ \Comment{$v$: destination node of $i$}
-    \EndIf
-\EndFor
-\State \Return $\mathcal{Y}$
-\EndProcedure
-\end{algorithmic}
-\end{algorithm}
-
-\Cref{alg:materialize_cutset_products} is used during the batched cutset merge. It materializes the Cartesian products for a batch of active cutset nodes before filtering and merging them into the running global frontier.
-
-\begin{algorithm}[htbp]
-\caption{Materialize Cutset Products}
-\label{alg:materialize_cutset_products}
-\begin{algorithmic}[1]
-\Require Frontiers $\mathcal{Y}^{\downarrow}$, $\mathcal{Y}^{\uparrow}$; node offsets $\phi^{\downarrow}$, $\phi^{\uparrow}$ and sizes $\kappa^{\downarrow}$, $\kappa^{\uparrow}$ for nodes in batch $\mathcal{B}$; product offsets $\phi^p$
-\Procedure{MaterializeProducts}{$\mathcal{Y}^{\downarrow}, \mathcal{Y}^{\uparrow}, \mathcal{B}$}
-\State Allocate flat candidate buffer $\beta$ of size $\sum_{v \in \mathcal{B}} \kappa^{\downarrow}_v \cdot \kappa^{\uparrow}_v$
-\ForAll{nodes $v \in \mathcal{B}$ \textbf{in parallel on GPU}} \Comment{One thread block per node}
-    \State $T \gets \kappa^{\downarrow}_v \cdot \kappa^{\uparrow}_v$ \Comment{Total candidates for node $v$}
-    \ForAll{candidate indices $p = 0, \dots, T-1$ \textbf{in parallel}}
-        \State $i \gets \lfloor p / \kappa^{\uparrow}_v \rfloor$; \quad $j \gets p \pmod{\kappa^{\uparrow}_v}$
-        \State $y^{\downarrow} \gets \mathcal{Y}^{\downarrow}(\phi^{\downarrow}_v + i)$; \quad $y^{\uparrow} \gets \mathcal{Y}^{\uparrow}(\phi^{\uparrow}_v + j)$
-        \State $\beta[\,\phi^p_v + p\,] \gets y^{\downarrow} + y^{\uparrow}$
-    \EndFor
-\EndFor
-\State \Return $\beta$
-\EndProcedure
-\end{algorithmic}
-\end{algorithm}
 
 \section{Additional Experimental Results}
 \label{app:additional_results}
 
 This appendix reports the full set of computational results summarized in \Cref{tab:combined_result_short}. The full MOKP, MOSPP, and MOTSP results are given in \Cref{tab:mokp_result,tab:mospp_result,tab:motsp_result}, respectively.
 
-The complete MOKP runtime comparison is shown in \Cref{tab:mokp_result}.
+The complete MOKP runtime comparison is shown in \Cref{tab:mokp_result}. The complete MOSPP runtime comparison is shown in \Cref{tab:mospp_result}.
+
 \begin{table*}[t]
 \centering
 \scriptsize
 \caption{MOKP Pareto Enumeration Runtime Comparison Across Enumeration Methods}
-\resizebox{0.7\textwidth}{!}{%
+\resizebox{0.8\textwidth}{!}{%
 \begin{tabular}{rrlrrl|rrlrrl}
 \toprule
 N & K & Method & Time (S) & Speed-up & $S^{(M,T)}$ & N & K & Method & Time (S) & Speed-up & $S^{(M,T)}$ \\
@@ -851,12 +853,11 @@ N & K & Method & Time (S) & Speed-up & $S^{(M,T)}$ & N & K & Method & Time (S) &
 \label{tab:mokp_result}
 \end{table*}
 
-The complete MOSPP runtime comparison is shown in \Cref{tab:mospp_result}.
 \begin{table*}[t]
 \centering
 \scriptsize
 \caption{MOSPP Pareto Enumeration Runtime Comparison Across Enumeration Methods}
-\resizebox{0.7\textwidth}{!}{%
+\resizebox{0.8\textwidth}{!}{%
 \begin{tabular}{rrlrrl|rrlrrl}
 \toprule
 N & K & Method & Time (S) & Speed-up & $S^{(M,T)}$ & N & K & Method & Time (S) & Speed-up & $S^{(M,T)}$ \\
@@ -907,7 +908,7 @@ The complete MOTSP runtime comparison is shown in \Cref{tab:motsp_result}.
 \centering
 \scriptsize
 \caption{MOTSP Pareto Enumeration Runtime Comparison Across Enumeration Methods}
-\resizebox{0.7\textwidth}{!}{%
+\resizebox{0.8\textwidth}{!}{%
 \begin{tabular}{rrlrrl|rrlrrl}
 \toprule
 N & K & Method & Time (S) & Speed-up & $S^{(M,T)}$ & N & K & Method & Time (S) & Speed-up & $S^{(M,T)}$ \\

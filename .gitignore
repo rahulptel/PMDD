@@ -3,7 +3,8 @@ INSTRUCTIONS.md
 *.jsonl
 multiobj_*
 
-reports
+reports/cp-v2
+reports/obsolete
 obj
 resources
 outputs
@@ -15,3 +16,12 @@ tests/tmp/
 *TMP*
 *RUN*
 *slurm*.out
+
+*.aux
+*.bbl
+*.blg
+*.fdb_latexmk
+*.fls
+*.log
+*.out
+*.synctex.gz

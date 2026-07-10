@@ -1,15 +1,15 @@
-# Parallel Decision Diagram-based Multiobjective Discrete Optimization
+# Parallel Multiobjective Decision Diagrams
 
-Parallel Decision Diagram-based Multiobjective Discrete Optimization, or
-`PDDMODO`, is a C++ research codebase for exact multiobjective optimization
+Parallel Multiobjective Decision Diagrams, or
+`PMDD`, is a C++ research codebase for exact multiobjective optimization
 with decision diagrams. It builds binary decision diagrams (BDDs) or multivalued
 decision diagrams (MDDs), then enumerates the Pareto frontier with CPU
 algorithms and selected CUDA implementations.
 
-The active parallel decision-diagram implementation now lives under `src/pdd`.
+The active parallel decision-diagram implementation now lives under `src/pmdd`.
 Baseline implementations used for comparison live under `src/baseline`.
 
-The main PDD executable is compiled for a fixed number of objectives:
+The main PMDD executable is compiled for a fixed number of objectives:
 
 ```bash
 multiobj_nobjs<NUM_OBJS>
@@ -24,8 +24,8 @@ For example, a 3-objective build produces `multiobj_nobjs3`. Use a binary whose
 .
 |-- data/                         # Benchmark/test instances grouped by objective count
 |-- src/
-|   |-- pdd/                      # Active parallel decision-diagram implementation
-|   |   |-- makefile              # PDD build file
+|   |-- pmdd/                      # Active parallel decision-diagram implementation
+|   |   |-- makefile              # PMDD build file
 |   |   |-- compile_all           # Helper script for NUM_OBJS=3..7 builds
 |   |   |-- main.cpp              # CLI entry point and problem dispatch
 |   |   |-- bdd/                  # BDD structures and constructors
@@ -38,29 +38,29 @@ For example, a 3-objective build produces `multiobj_nobjs3`. Use a binary whose
 |   `-- baseline/
 |       |-- dd/                   # Decision-diagram/network-model baseline
 |       `-- dpa/                  # Defining-point algorithm baseline
-|-- resources/bin/pdd/            # PDD binaries produced by make/compile_all
+|-- resources/bin/pmdd/            # PMDD binaries produced by make/compile_all
 |-- resources/bin/baseline/dd/    # DD baseline binaries produced by make/compile_all.sh
 |-- resources/bin/baseline/dpa/   # DPA baseline binary produced by make
 |-- kb/                           # Repository-local notes and run context
 `-- results/                      # Generated/checked-in result plots
 ```
 
-The currently wired PDD problem types are:
+The currently wired PMDD problem types are:
 
 - `1`: multiobjective knapsack, represented as a BDD.
 - `2`: multiobjective set packing, converted to an independent-set BDD.
 - `3`: multiobjective TSP, represented as an MDD.
 
-The available PDD enumeration methods are:
+The available PMDD enumeration methods are:
 
 - `1`: top-down BFS frontier propagation.
 - `2`: bottom-up BFS frontier propagation.
 - `3`: dynamic layer cutset coupling.
 
-## PDD Build
+## PMDD Build
 
-Builds are controlled by `src/pdd/makefile`. Run `make` from `src/pdd`, or use
-`make -C src/pdd` from the repository root.
+Builds are controlled by `src/pmdd/makefile`. Run `make` from `src/pmdd`, or use
+`make -C src/pmdd` from the repository root.
 
 Important options:
 
@@ -76,50 +76,50 @@ The makefile uses `g++` for C++ sources and expects Boost headers under
 CPU-only build:
 
 ```bash
-make -C src/pdd clean
-make -C src/pdd NUM_OBJS=3 ENABLE_CUDA=0 ENABLE_OPENMP=1
+make -C src/pmdd clean
+make -C src/pmdd NUM_OBJS=3 ENABLE_CUDA=0 ENABLE_OPENMP=1
 ```
 
 CUDA build:
 
 ```bash
-make -C src/pdd clean
-make -C src/pdd NUM_OBJS=3 ENABLE_CUDA=1 ENABLE_OPENMP=1
+make -C src/pmdd clean
+make -C src/pmdd NUM_OBJS=3 ENABLE_CUDA=1 ENABLE_OPENMP=1
 ```
 
 If Boost is installed elsewhere:
 
 ```bash
-make -C src/pdd BOOSTDIR=/path/to/boost-prefix NUM_OBJS=3 ENABLE_CUDA=0 ENABLE_OPENMP=1
+make -C src/pmdd BOOSTDIR=/path/to/boost-prefix NUM_OBJS=3 ENABLE_CUDA=0 ENABLE_OPENMP=1
 ```
 
-The makefile and helper script write binaries to `resources/bin/pdd`. The helper
+The makefile and helper script write binaries to `resources/bin/pmdd`. The helper
 script builds `multiobj_nobjs3` through `multiobj_nobjs7` by default:
 
 ```bash
-src/pdd/compile_all
+src/pmdd/compile_all
 ```
 
 Useful overrides:
 
 ```bash
-ENABLE_CUDA=0 ENABLE_OPENMP=1 src/pdd/compile_all
-NUM_OBJS_MIN=4 NUM_OBJS_MAX=6 src/pdd/compile_all
-CLEAN_FIRST=0 MAKE_JOBS=-j8 src/pdd/compile_all
+ENABLE_CUDA=0 ENABLE_OPENMP=1 src/pmdd/compile_all
+NUM_OBJS_MIN=4 NUM_OBJS_MAX=6 src/pmdd/compile_all
+CLEAN_FIRST=0 MAKE_JOBS=-j8 src/pmdd/compile_all
 ```
 
 On Compute Canada-style environments using `machine=cc`, set `BOOST_ROOT`:
 
 ```bash
-BOOST_ROOT=/path/to/boost machine=cc ENABLE_CUDA=0 src/pdd/compile_all
+BOOST_ROOT=/path/to/boost machine=cc ENABLE_CUDA=0 src/pmdd/compile_all
 ```
 
-## PDD Run
+## PMDD Run
 
 General CLI:
 
 ```bash
-resources/bin/pdd/multiobj_nobjs3 <input-file> <problem-type> <method> <state_dominance> [options]
+resources/bin/pmdd/multiobj_nobjs3 <input-file> <problem-type> <method> <state_dominance> [options]
 ```
 
 Arguments:
@@ -183,19 +183,19 @@ For TSP MDDs:
 - GPU supports methods `1` and `3`.
 - Method `2` is not accepted for TSP.
 
-## Small PDD Tests
+## Small PMDD Tests
 
 The commands below use 3-objective instances included in `data/`.
 
 ```bash
-make -C src/pdd clean
-make -C src/pdd NUM_OBJS=3 ENABLE_CUDA=0 ENABLE_OPENMP=1
+make -C src/pmdd clean
+make -C src/pmdd NUM_OBJS=3 ENABLE_CUDA=0 ENABLE_OPENMP=1
 ```
 
 CPU top-down knapsack:
 
 ```bash
-resources/bin/pdd/multiobj_nobjs3 data/3/knapsack/KP_p-3_n-10_ins-1.dat 1 1 0 \
+resources/bin/pmdd/multiobj_nobjs3 data/3/knapsack/KP_p-3_n-10_ins-1.dat 1 1 0 \
   --backend cpu --cpu-threads 4 \
   --save-stats --stats-out test.cpu.stats.jsonl
 ```
@@ -203,7 +203,7 @@ resources/bin/pdd/multiobj_nobjs3 data/3/knapsack/KP_p-3_n-10_ins-1.dat 1 1 0 \
 CPU dynamic layer cutset knapsack:
 
 ```bash
-resources/bin/pdd/multiobj_nobjs3 data/3/knapsack/KP_p-3_n-10_ins-1.dat 1 3 0 \
+resources/bin/pmdd/multiobj_nobjs3 data/3/knapsack/KP_p-3_n-10_ins-1.dat 1 3 0 \
   --backend cpu --cpu-threads 4 \
   --save-frontier --frontier-out test.cpu.frontier.csv.gz
 ```
@@ -211,33 +211,33 @@ resources/bin/pdd/multiobj_nobjs3 data/3/knapsack/KP_p-3_n-10_ins-1.dat 1 3 0 \
 TSP MDD:
 
 ```bash
-resources/bin/pdd/multiobj_nobjs3 data/3/tsp/tsp-nobj3-ncities5-seed495.dat 3 1 0 \
+resources/bin/pmdd/multiobj_nobjs3 data/3/tsp/tsp-nobj3-ncities5-seed495.dat 3 1 0 \
   --backend cpu --cpu-threads 4
 ```
 
-Successful PDD runs always print three lines:
+Successful PMDD runs always print three lines:
 
 1. Number of Pareto solutions.
 2. CPU total time, equal to compile time plus enumeration time.
 3. Tab-separated run statistics. BDD problem types include BDD structure fields;
    TSP prints compile/enumeration timing fields.
 
-## PDD Code Map
+## PMDD Code Map
 
-- `src/pdd/main.cpp`: CLI dispatch, instance loading, BDD/MDD construction,
+- `src/pmdd/main.cpp`: CLI dispatch, instance loading, BDD/MDD construction,
   method/backend selection, output calls.
-- `src/pdd/util/`: CLI parsing, gzip frontier output, JSONL stats, OpenMP
+- `src/pmdd/util/`: CLI parsing, gzip frontier output, JSONL stats, OpenMP
   compatibility, CPU affinity, common helpers.
-- `src/pdd/bdd/`: BDD node/arc structure, reduction logic, knapsack and
+- `src/pmdd/bdd/`: BDD node/arc structure, reduction logic, knapsack and
   independent-set BDD constructors.
-- `src/pdd/mdd/`: MDD node/arc structure and exact TSP MDD constructor.
-- `src/pdd/enum/`: central multiobjective frontier enumeration dispatch and
+- `src/pmdd/mdd/`: MDD node/arc structure and exact TSP MDD constructor.
+- `src/pmdd/enum/`: central multiobjective frontier enumeration dispatch and
   Pareto frontier container.
-- `src/pdd/enum/cpu/`: CPU top-down, bottom-up, coupled, and state-dominance
+- `src/pmdd/enum/cpu/`: CPU top-down, bottom-up, coupled, and state-dominance
   implementations.
-- `src/pdd/enum/gpu/`: CUDA top-down/coupled implementations, dominance helpers,
+- `src/pmdd/enum/gpu/`: CUDA top-down/coupled implementations, dominance helpers,
   device-side types, wrappers, and CPU-only stubs.
-- `src/pdd/instances/`: parsers for knapsack, set packing, independent set, and
+- `src/pmdd/instances/`: parsers for knapsack, set packing, independent set, and
   TSP. `assignment_instance.*` is stubbed and not integrated in `main`.
 
 ## Baselines
@@ -263,16 +263,16 @@ See the baseline source directories for baseline-specific CLI details.
 
 ## Input Format Cheat Sheet
 
-- Knapsack (`src/pdd/instances/knapsack_instance.cpp`):
+- Knapsack (`src/pmdd/instances/knapsack_instance.cpp`):
   - `n_vars n_cons num_objs`
   - `num_objs` rows of `n_vars` objective coefficients
   - For each constraint: `n_vars` coefficients followed by one RHS.
-- Set packing (`src/pdd/instances/setpacking_instance.hpp`):
+- Set packing (`src/pmdd/instances/setpacking_instance.hpp`):
   - `n_vars n_cons n_objs`
   - Objective matrix of shape `n_objs x n_vars`
   - For each constraint: `count` followed by `count` 1-based variable ids.
   - The parser converts constraint variable ids to 0-based indices.
-- TSP (`src/pdd/instances/tsp_instance.cpp`):
+- TSP (`src/pmdd/instances/tsp_instance.cpp`):
   - `n_objs n_cities`
   - For each objective: full `n_cities x n_cities` cost matrix.
 
@@ -286,4 +286,4 @@ See the baseline source directories for baseline-specific CLI details.
   `gzip` on `PATH`.
 - The `kb/` directory is a repository-local knowledge base. Some notes may
   mention older source paths such as `src/enum/*`; in this checkout, use the
-  current `src/pdd/enum/*` paths as authoritative.
+  current `src/pmdd/enum/*` paths as authoritative.

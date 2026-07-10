@@ -62,7 +62,7 @@ fi
 
 PROJECT_ROOT="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(CDPATH= cd -- "$PROJECT_ROOT/../.." && pwd)"
-BIN_DIR="$REPO_ROOT/resources/bin/pdd"
+BIN_DIR="$REPO_ROOT/resources/bin/pmdd"
 
 cd "$PROJECT_ROOT"
 mkdir -p "$BIN_DIR"
