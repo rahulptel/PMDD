@@ -176,6 +176,29 @@ inflated (28s/26s here vs ~13s these same instances got in an earlier
 uncontended session). Re-run for tighter confidence intervals when the GPU is
 free, but the direction and rough magnitude of the win are not in doubt.
 
+**Third problem class — MOKP knapsack (BDD, `coupled_bdd_cuda_enumerate`), 2026-07-14.**
+`coupled_bdd_cuda_enumerate` (enum.cu:746) calls the same shared
+`couple_cutsets_cuda`, so this fix applies to knapsack coupled runs too, not
+just MDD/TSP and set-packing. Tested `data/6/knapsack/knapsack-50-6-1000-*.dat`
+(50 vars, 1 constraint, 6 objectives; `layer_coupling≈28`,
+`work_join_products_total≈400M` — ~8x smaller than TSP-5's 3.2B). Solution
+counts match exactly (33305, CPU vs GPU vs baseline vs fixed all agree).
+
+First (single-run) comparison suggested +14.5% (13.96s baseline → 11.93s
+fixed) — but a same-session interleaved re-measurement (3 reps, same binaries,
+alternating A/C) came back **11.58–11.65s for both configs, i.e. no
+measurable difference**. The initial 13.96s baseline run was a noise outlier
+(exactly the trap the methodology addendum exists for); trust the interleaved
+number. Plausible reason this instance doesn't benefit: at only ~400M
+theoretical join products (vs TSP-5's 3.2B, vs the ~1.2B on the hardest
+150/7 set-packing seed), the join is a much smaller fraction of this
+instance's ~12s total than the two-sided BDD layer-expansion sweeps that build
+the td/bu half-frontiers in the first place — sweeps this change doesn't
+touch. **Verdict: neutral on this instance size, not a regression, not a win.**
+Whether MOKP benefits at all depends on finding an instance where the join
+actually dominates wall time; larger `n_vars` (100+) or more objectives would
+grow the cutset width and might cross that threshold — untested.
+
 ### Measurement-protocol addendum (learned the hard way)
 
 The comparisons above mixed baselines measured on different days. On this
