@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <climits>
 #include <cmath>
 #include <ctime>
 #include <iostream>
@@ -92,6 +93,65 @@ __global__ void materialize_cutset_products_kernel(const ObjType *td_pts, const 
         for (int o = 0; o < NOBJS; ++o)
             out[oi * NOBJS + o] =
                 td_pts[(tbase + ti) * NOBJS + o] + bu_pts[(bbase + bi) * NOBJS + o];
+    }
+}
+
+// For each node (indexed via nz_nodes), compute its ideal/utopia product point:
+// ub[o] = max_td[o] + max_bu[o]. Every actual product td[i]+bu[j] of that node is
+// componentwise <= this point, so if a frontier point dominates-or-ties ub, it
+// dominates-or-ties every product the node could ever produce.
+__global__ void compute_node_ub_kernel(const ObjType *td_pts, const int *td_off,
+                                       const ObjType *bu_pts, const int *bu_off,
+                                       const int *nz_nodes, int num_nz_nodes, ObjType *ub_out) {
+    const int j = blockIdx.x;
+    if (j >= num_nz_nodes)
+        return;
+    const int node = nz_nodes[j];
+    const int tbeg = td_off[node], tend = td_off[node + 1];
+    const int bbeg = bu_off[node], bend = bu_off[node + 1];
+
+    ObjType local_max_td[NOBJS];
+    ObjType local_max_bu[NOBJS];
+#pragma unroll
+    for (int o = 0; o < NOBJS; ++o) {
+        local_max_td[o] = INT_MIN;
+        local_max_bu[o] = INT_MIN;
+    }
+    for (int i = tbeg + threadIdx.x; i < tend; i += blockDim.x) {
+#pragma unroll
+        for (int o = 0; o < NOBJS; ++o)
+            local_max_td[o] = max(local_max_td[o], td_pts[i * NOBJS + o]);
+    }
+    for (int i = bbeg + threadIdx.x; i < bend; i += blockDim.x) {
+#pragma unroll
+        for (int o = 0; o < NOBJS; ++o)
+            local_max_bu[o] = max(local_max_bu[o], bu_pts[i * NOBJS + o]);
+    }
+
+    __shared__ ObjType sh_td[kThreadsPerBlock * NOBJS];
+    __shared__ ObjType sh_bu[kThreadsPerBlock * NOBJS];
+#pragma unroll
+    for (int o = 0; o < NOBJS; ++o) {
+        sh_td[threadIdx.x * NOBJS + o] = local_max_td[o];
+        sh_bu[threadIdx.x * NOBJS + o] = local_max_bu[o];
+    }
+    __syncthreads();
+    for (int stride = blockDim.x / 2; stride > 0; stride >>= 1) {
+        if (threadIdx.x < stride) {
+#pragma unroll
+            for (int o = 0; o < NOBJS; ++o) {
+                sh_td[threadIdx.x * NOBJS + o] =
+                    max(sh_td[threadIdx.x * NOBJS + o], sh_td[(threadIdx.x + stride) * NOBJS + o]);
+                sh_bu[threadIdx.x * NOBJS + o] =
+                    max(sh_bu[threadIdx.x * NOBJS + o], sh_bu[(threadIdx.x + stride) * NOBJS + o]);
+            }
+        }
+        __syncthreads();
+    }
+    if (threadIdx.x == 0) {
+#pragma unroll
+        for (int o = 0; o < NOBJS; ++o)
+            ub_out[j * NOBJS + o] = sh_td[o] + sh_bu[o];
     }
 }
 
@@ -381,6 +441,21 @@ ParetoFrontier *couple_cutsets_cuda(int cutset_nodes,
     thrust::sort_by_key(d_nz_scores.begin(), d_nz_scores.end(), d_nz_nodes.begin(),
                         thrust::greater<long long>());
 
+    // Ideal/utopia product point per node, in the same sorted order as d_nz_nodes:
+    // ub[j] = max_td[node_j] + max_bu[node_j]. Used to skip whole nodes below once
+    // the running frontier already dominates-or-ties everything that node could
+    // ever produce (improvements.md 3.1).
+    thrust::device_vector<ObjType> d_ub_points(d_nz_nodes.size() * NOBJS, 0);
+    if (!d_nz_nodes.empty()) {
+        compute_node_ub_kernel<<<static_cast<int>(d_nz_nodes.size()), kThreadsPerBlock>>>(
+            thrust::raw_pointer_cast(d_td_points.data()), thrust::raw_pointer_cast(d_td_offsets.data()),
+            thrust::raw_pointer_cast(d_bu_points.data()), thrust::raw_pointer_cast(d_bu_offsets.data()),
+            thrust::raw_pointer_cast(d_nz_nodes.data()), static_cast<int>(d_nz_nodes.size()),
+            thrust::raw_pointer_cast(d_ub_points.data()));
+        if (!sync_kernel("compute_node_ub", reason))
+            return NULL;
+    }
+
     thrust::host_vector<int> h_nz_nodes = d_nz_nodes;
     std::vector<int> nz_nodes(h_nz_nodes.begin(), h_nz_nodes.end());
 
@@ -392,6 +467,48 @@ ParetoFrontier *couple_cutsets_cuda(int cutset_nodes,
 
     int batch_begin = 0;
     while (batch_begin < static_cast<int>(nz_nodes.size())) {
+        // Drop remaining nodes whose ideal point is already dominated-or-equal by the
+        // running frontier: every product such a node could form is dominated too, so
+        // it never needs to be materialized. The frontier only grows, so this check is
+        // re-run each iteration (a node not prunable now may become prunable later).
+        if (frontier_size > 0) {
+            const int remaining = static_cast<int>(nz_nodes.size()) - batch_begin;
+            thrust::device_vector<int> ub_alive(remaining, 0);
+            mark_dominated_or_equal_by_frontier_kernel<<<ceil_div(remaining, kThreadsPerBlock),
+                                                          kThreadsPerBlock>>>(
+                thrust::raw_pointer_cast(d_ub_points.data()) + batch_begin * NOBJS, remaining,
+                thrust::raw_pointer_cast(d_frontier_pts.data()), frontier_size,
+                thrust::raw_pointer_cast(ub_alive.data()));
+            if (!sync_kernel("ub_prune_check", reason))
+                return NULL;
+
+            const int kept = thrust::reduce(ub_alive.begin(), ub_alive.end(), 0);
+            if (kept < remaining) {
+                thrust::device_vector<ObjType> ub_suffix(d_ub_points.begin() + batch_begin * NOBJS,
+                                                         d_ub_points.end());
+                int suffix_n = remaining;
+                if (!compact_points_by_alive(ub_suffix, suffix_n, ub_alive, kept,
+                                             "ub_prune_compact", reason)) {
+                    return NULL;
+                }
+                d_ub_points.resize(batch_begin * NOBJS + kept * NOBJS);
+                thrust::copy(ub_suffix.begin(), ub_suffix.end(),
+                            d_ub_points.begin() + batch_begin * NOBJS);
+
+                thrust::host_vector<int> h_alive = ub_alive;
+                int w = batch_begin;
+                for (int r = batch_begin; r < static_cast<int>(nz_nodes.size()); ++r) {
+                    if (h_alive[r - batch_begin]) {
+                        nz_nodes[w++] = nz_nodes[r];
+                    }
+                }
+                nz_nodes.resize(w);
+            }
+            if (batch_begin >= static_cast<int>(nz_nodes.size())) {
+                break;
+            }
+        }
+
         long long bprod_total = 0;
         int batch_end = batch_begin;
         while (batch_end < static_cast<int>(nz_nodes.size())) {
