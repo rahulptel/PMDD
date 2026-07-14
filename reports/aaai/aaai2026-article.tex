@@ -99,148 +99,6 @@ We make the following contributions. We identify three sources of parallelism in
 A MODO problem can be defined as the minimization of an $m$-dimensional objective vector function $\mathbf{f}(\mathbf{x}) = (f_1(\mathbf{x}), f_2(\mathbf{x}), \dots, f_m(\mathbf{x}))^\top$ subject to $\mathbf{x} \in \mathcal{X}$. Here, $\mathbf{x} = (x_1, x_2, \dots, x_n)^\top$ represents a vector of discrete decision variables, and $\mathcal{X} \subseteq \mathbb{Z}^n$ is the bounded, discrete feasible region. We compare different feasible solutions based on the principle of \emph{Pareto dominance}. For any two feasible solutions $\mathbf{x}^1, \mathbf{x}^2 \in \mathcal{X}$, the solution $\mathbf{x}^1$ is said to Pareto dominate $\mathbf{x}^2$, denoted by $\mathbf{f}(\mathbf{x}^1) \prec \mathbf{f}(\mathbf{x}^2)$, if $f_i(\mathbf{x}^1) \le f_i(\mathbf{x}^2)$ for all $i \in \{1, \dots, m\}$, and there exists at least one index $j \in \{1, \dots, m\}$ strictly satisfying $f_j(\mathbf{x}^1) < f_j(\mathbf{x}^2)$.
 An objective vector $\mathbf{y}^\star = \mathbf{f}(\mathbf{x}^\star)$ associated with a feasible solution $\mathbf{x}^\star \in \mathcal{X}$ is defined as a \emph{nondominated point} if there exists no other feasible solution $\mathbf{x} \in \mathcal{X}$ such that $\mathbf{f}(\mathbf{x}) \prec \mathbf{y}^\star$. The collection of all such nondominated points across the entire feasible region constitutes the PF. Mathematically, this frontier is expressed as $\mathcal{Y}_N = \{\mathbf{f}(\mathbf{x}) \mid \mathbf{x} \in \mathcal{X}, \nexists \, \mathbf{x}' \in \mathcal{X} \text{ such that } \mathbf{f}(\mathbf{x}') \prec \mathbf{f}(\mathbf{x})\}$. The primary goal of exact multiobjective optimization is to enumerate the PF.
 
-
-% \begin{algorithm}[t!]
-% \caption{Bidirectional PF Enumeration and Serial CPU Backend}
-% \label{alg:bidir_pf}
-% \begin{algorithmic}[1]
-% \Require Exact decision diagram $\mathcal{D}$
-
-% \Procedure{FilterDominated}{$\mathcal{Y}$}
-%     \Comment{$\mathcal{O}(|\mathcal{Y}|^2)$}
-%     \State \Return
-%     $\{
-%         \mathbf{y} \in \mathcal{Y}
-%         \mid
-%         \nexists\,\mathbf{y}' \in \mathcal{Y}
-%         \text{ such that }
-%         \mathbf{y}' \prec \mathbf{y}
-%     \}$
-% \EndProcedure
-
-% \Procedure{ExpandLayer$_{\mathrm{CPU}}$}{$\mathcal{Y},j,d$}
-%     \If{$d=\downarrow$}
-%         \For{\textbf{each} arc $a=(u,v)$ with $v\in\mathcal{L}_j$}
-%             \State
-%             $\mathcal{Y}(v)
-%             \gets
-%             \mathcal{Y}(v)
-%             \cup
-%             \bigl(
-%                 \mathcal{Y}(u)
-%                 \oplus
-%                 \{\mathbf{v}(a)\}
-%             \bigr)$
-%             \State
-%             $\mathcal{Y}(v)
-%             \gets
-%             \Call{FilterDominated}{\mathcal{Y}(v)}$
-%         \EndFor
-%     \Else
-%         \For{\textbf{each} arc $a=(u,v)$ with $u\in\mathcal{L}_j$}
-%             \State
-%             $\mathcal{Y}(u)
-%             \gets
-%             \mathcal{Y}(u)
-%             \cup
-%             \bigl(
-%                 \mathcal{Y}(v)
-%                 \oplus
-%                 \{\mathbf{v}(a)\}
-%             \bigr)$
-%             \State
-%             $\mathcal{Y}(u)
-%             \gets
-%             \Call{FilterDominated}{\mathcal{Y}(u)}$
-%         \EndFor
-%     \EndIf
-%     \State \Return $\mathcal{Y}$
-% \EndProcedure
-
-% \Procedure{Couple$_{\mathrm{CPU}}$}
-% {$\mathcal{Y}^{\downarrow},
-%   \mathcal{Y}^{\uparrow},
-%   \mathcal{L}_c$}
-%     \State $\mathcal{Y}_N\gets\emptyset$
-%     \For{\textbf{each} node $u\in\mathcal{L}_c$}
-%         \State
-%         $\mathcal{Y}(u)
-%         \gets
-%         \mathcal{Y}^{\downarrow}(u)
-%         \oplus
-%         \mathcal{Y}^{\uparrow}(u)$
-%         \State
-%         $\mathcal{Y}_N
-%         \gets
-%         \Call{FilterDominated}
-%         {\mathcal{Y}_N\cup\mathcal{Y}(u)}$
-%     \EndFor
-%     \State \Return $\mathcal{Y}_N$
-% \EndProcedure
-
-% \Procedure{BidirectionalPF}{$\mathcal{D},\mathsf{B}$}
-%     \State
-%     $\mathcal{Y}^{\downarrow}(u)\gets\emptyset$ and
-%     $\mathcal{Y}^{\uparrow}(u)\gets\emptyset$
-%     for all $u\in\mathcal{N}$
-%     \State
-%     $\mathcal{Y}^{\downarrow}(\mathbf{r})\gets\{\mathbf{0}\}$,
-%     $\mathcal{Y}^{\uparrow}(\mathbf{t})\gets\{\mathbf{0}\}$
-
-%     \State
-%     $i_{\mathrm{td}}\gets 1$,
-%     $i_{\mathrm{bu}}\gets n+1$
-%     \State
-%     $s_{\mathrm{td}}\gets 0$,
-%     $s_{\mathrm{bu}}\gets 0$
-
-%     \While{$i_{\mathrm{td}}\neq i_{\mathrm{bu}}$}
-%         \If{$s_{\mathrm{td}}\le s_{\mathrm{bu}}$}
-%             \State $i_{\mathrm{td}}\gets i_{\mathrm{td}}+1$
-%             \State
-%             $\mathcal{Y}^{\downarrow}
-%             \gets
-%             \Call{ExpandLayer$_{\mathsf{B}}$}
-%             {\mathcal{Y}^{\downarrow},
-%              i_{\mathrm{td}},
-%              \downarrow}$
-%             \State
-%             $s_{\mathrm{td}}
-%             \gets
-%             \Call{ComputeScore}
-%             {\mathcal{Y}^{\downarrow},i_{\mathrm{td}}}$
-%         \Else
-%             \State $i_{\mathrm{bu}}\gets i_{\mathrm{bu}}-1$
-%             \State
-%             $\mathcal{Y}^{\uparrow}
-%             \gets
-%             \Call{ExpandLayer$_{\mathsf{B}}$}
-%             {\mathcal{Y}^{\uparrow},
-%              i_{\mathrm{bu}},
-%              \uparrow}$
-%             \State
-%             $s_{\mathrm{bu}}
-%             \gets
-%             \lambda\cdot
-%             \Call{ComputeScore}
-%             {\mathcal{Y}^{\uparrow},i_{\mathrm{bu}}}$
-%         \EndIf
-%     \EndWhile
-
-%     \State $c\gets i_{\mathrm{td}}$
-%     \State \Return
-%     \Call{Couple$_{\mathsf{B}}$}
-%     {$\mathcal{Y}^{\downarrow},
-%      \mathcal{Y}^{\uparrow},
-%      \mathcal{L}_c$}
-% \EndProcedure
-
-% \State \Return
-% \Call{BidirectionalPF}{$\mathcal{D},\mathrm{CPU}$}
-% \end{algorithmic}
-% \end{algorithm}
-
-
 \begin{algorithm}[t!]
 \caption{Bidirectional PF Enumeration}
 \label{alg:bidir_pf}
@@ -249,6 +107,10 @@ An objective vector $\mathbf{y}^\star = \mathbf{f}(\mathbf{x}^\star)$ associated
 $\mathcal{D}=(\mathcal{N},\mathcal{A})$
 with layers $\mathcal{L}_1,\dots,\mathcal{L}_{n+1}$;
 balancing parameter $\lambda$
+\Statex For $\mathcal{S},\mathcal{T}\subseteq\mathbb{R}^m$, let
+$\mathcal{S}\oplus\mathcal{T}
+=\{\mathbf{s}+\mathbf{t}\mid
+\mathbf{s}\in\mathcal{S},\mathbf{t}\in\mathcal{T}\}$
 
 \Procedure{FilterDominated}{$\mathcal{Y}$}
     \Comment{$\mathcal{O}(|\mathcal{Y}|^2)$}
@@ -264,38 +126,42 @@ balancing parameter $\lambda$
 
 \Procedure{ExpandLayer$_{\mathrm{CPU}}$}{$\mathcal{Y},j,d$}
     \If{$d=\downarrow$}
-        \For{\textbf{each} arc $a=(u,v)$ with $v\in\mathcal{L}_j$}
-            \State
-            $\mathcal{Y}(v)
-            \gets
-            \mathcal{Y}(v)
-            \cup
-            \left(
-                \mathcal{Y}(u)
-                \oplus
-                \{\mathbf{v}(a)\}
-            \right)$
-            \State
-            $\mathcal{Y}(v)
-            \gets
-            \Call{FilterDominated}{\mathcal{Y}(v)}$
+        \For{\textbf{each} node $v\in\mathcal{L}_j$}
+            \For{\textbf{each} incoming arc $a=(u,v)$}
+                \State
+                $\mathcal{Y}(v)
+                \gets
+                \mathcal{Y}(v)
+                \cup
+                \left(
+                    \mathcal{Y}(u)
+                    \oplus
+                    \{\mathbf{v}(a)\}
+                \right)$
+                \State
+                $\mathcal{Y}(v)
+                \gets
+                \Call{FilterDominated}{\mathcal{Y}(v)}$
+            \EndFor
         \EndFor
     \Else
-        \For{\textbf{each} arc $a=(u,v)$ with $u\in\mathcal{L}_j$}
-            \State
-            $\mathcal{Y}(u)
-            \gets
-            \mathcal{Y}(u)
-            \cup
-            \left(
-                \mathcal{Y}(v)
-                \oplus
-                \{\mathbf{v}(a)\}
-            \right)$
-            \State
-            $\mathcal{Y}(u)
-            \gets
-            \Call{FilterDominated}{\mathcal{Y}(u)}$
+        \For{\textbf{each} node $u\in\mathcal{L}_j$}
+            \For{\textbf{each} outgoing arc $a=(u,v)$}
+                \State
+                $\mathcal{Y}(u)
+                \gets
+                \mathcal{Y}(u)
+                \cup
+                \left(
+                    \mathcal{Y}(v)
+                    \oplus
+                    \{\mathbf{v}(a)\}
+                \right)$
+                \State
+                $\mathcal{Y}(u)
+                \gets
+                \Call{FilterDominated}{\mathcal{Y}(u)}$
+            \EndFor
         \EndFor
     \EndIf
     \State \Return $\mathcal{Y}$
@@ -389,57 +255,50 @@ balancing parameter $\lambda$
 
 A DD is a directed layered acyclic graph $\mathcal{D} = (\mathcal{N}, \mathcal{A})$ defined by a node set $\mathcal{N}$ and an arc set $\mathcal{A}$. The node set is partitioned into $n+1$ layers, $\mathcal{N} = \mathcal{L}_1 \cup \dots \cup \mathcal{L}_{n+1}$, corresponding to the sequence of the $n$ decision variables. The first layer $\mathcal{L}_1$ contains only the \emph{root node} $\mathbf{r}$, and the final layer $\mathcal{L}_{n+1}$ contains only the \emph{terminal node} $\mathbf{t}$.
 
-The arcs in $\mathcal{A}$ are directed from nodes in layer $\mathcal{L}_j$ to nodes in layer $\mathcal{L}_{j+1}$ for $j \in \{1, \dots, n\}$. Every arc $a \in \mathcal{A}$ originating from layer $\mathcal{L}_j$ possesses two key attributes: an \emph{assignment value} $d(a) \in \mathbb{Z}$, which dictates the value assigned to the decision variable $x_j$, and an \emph{objective weight} $\mathbf{v}(a) \in \mathbb{R}^m$, which represents the transition's contribution to the $m$-dimensional objective function. A path $p = (a_1, \dots, a_n)$ from the root $\mathbf{r}$ to the terminal node $\mathbf{t}$ encodes a complete decision vector $\mathbf{x}(p) = (d(a_1), \dots, d(a_n))^\top \in \mathbb{Z}^n$, with an associated objective vector obtained by accumulating the arc weights along the path $\mathbf{v}(p) = \sum_{i=1}^n \mathbf{v}(a_i)$.
+Each arc $a\in\mathcal{A}$ connects a node in $\mathcal{L}_j$ to a node in $\mathcal{L}_{j+1}$ and has an assignment value $d(a)\in\mathbb{Z}$ and an objective weight $\mathbf{v}(a)\in\mathbb{R}^m$. The assignment value specifies the value of $x_j$, while the objective weight gives the contribution of that transition to the objective vector. Consequently, a root-to-terminal path $p=(a_1,\dots,a_n)$ encodes the decision vector $\mathbf{x}(p)=(d(a_1),\dots,d(a_n))^\top$ and has value $\mathbf{v}(p)=\sum_{i=1}^n\mathbf{v}(a_i)$. Let $\mathcal{X}_{\mathcal{D}}=\{\mathbf{x}(p)\mid p\text{ is an }\mathbf{r}\text{-to-}\mathbf{t}\text{ path in }\mathcal{D}\}$ denote the solutions encoded by the diagram. The DD is \emph{exact} if $\mathcal{X}_{\mathcal{D}}=\mathcal{X}$ and $\mathbf{v}(p)=\mathbf{f}(\mathbf{x}(p))$ for every root-to-terminal path. Its objective image is then $\mathcal{Y}_{\mathcal{D}}=\{\mathbf{v}(p)\mid p\text{ is an }\mathbf{r}\text{-to-}\mathbf{t}\text{ path}\}$, and filtering the dominated vectors from $\mathcal{Y}_{\mathcal{D}}$ yields the exact PF $\mathcal{Y}_N$.
 
-Let $\mathcal{X}_{\mathcal{D}} = \{ \mathbf{x}(p) \mid p \text{ is an } \mathbf{r}-\mathbf{t} \text{ path in } \mathcal{D} \}$ denote the set of solutions encoded by the diagram. A DD is said to be \emph{exact} for a given problem if it represents the feasible region ($\mathcal{X}_{\mathcal{D}} = \mathcal{X}$) and the path evaluations correctly compute the objective function ($\mathbf{v}(p) = \mathbf{f}(\mathbf{x}(p))$ for all paths). In this case, the image of the encoded solutions in the objective space is $\mathcal{Y}_{\mathcal{D}} = \{ \mathbf{v}(p) \mid p \text{ is an } \mathbf{r}\text{-to-}\mathbf{t} \text{ path} \}$. The nondominated vectors extracted from $\mathcal{Y}_{\mathcal{D}}$ constitute the exact PF $\mathcal{Y}_N$ of the original MODO problem.
+During enumeration, each node $u$ stores nondominated objective vectors associated with partial paths. We denote the \emph{top-down node frontier} by $\mathcal{Y}^{\downarrow}(u)$, corresponding to paths from $\mathbf{r}$ to $u$, and the \emph{bottom-up node frontier} by $\mathcal{Y}^{\uparrow}(u)$, corresponding to paths from $u$ to $\mathbf{t}$. An objective vector in either set is called a \emph{label}. A generated label that has not passed dominance filtering is referred as a \emph{candidate label}. As defined in \Cref{alg:bidir_pf}, the Minkowski sum $\mathcal{S}\oplus\mathcal{T}$ contains every pairwise sum of a label in $\mathcal{S}$ and a label in $\mathcal{T}$. During coupling, a \emph{global frontier} stores the nondominated complete-path labels accumulated across cutset nodes.
 
-% During enumeration, each DD node stores a \emph{node frontier}, a nondominated set of objective vectors associated with partial paths through that node. 
-% We write $\mathcal{Y}^{\downarrow}(u)$ for the node frontier of the partial paths from the root $\mathbf{r}$ to node $u$, and $\mathcal{Y}^{\uparrow}(u)$ for the node frontier of the partial paths from $u$ to the terminal $\mathbf{t}$.
-% In the root-side direction, $\mathcal{Y}^{\downarrow}(u)$ denotes the node frontier of partial paths from the root $\mathbf{r}$ to node $u$; in the terminal-side direction, $\mathcal{Y}^{\uparrow}(u)$ denotes the node frontier of partial paths from $u$ to the terminal $\mathbf{t}$. Individual objective vectors in a node frontier are called \emph{labels}. Newly generated, unfiltered labels are called \emph{candidate labels}. During cutset merging, a \emph{global frontier} denotes a running nondominated set over complete root-to-terminal labels. We reserve \emph{PF} for the final nondominated set $\mathcal{Y}_N$.
+Algorithm~\ref{alg:bidir_pf} gives a detailed overview of the bidirectional PF enumeration. It initializes top-down and bottom-up frontiers at $\mathbf{r}$ and $\mathbf{t}$, respectively, and expands one direction at each iteration until the layer pointers meet at a cutset $\mathcal{L}_c$. The choice of hardware to run the enumeration is determined by the backend parameter $\mathsf{B}\in\{\mathrm{CPU},\mathrm{GPU}\}$, with shared initialization, direction-selection rule, and stopping condition. For the CPU backend, \textsc{ExpandLayer} assigns each node frontier to one worker, shifts the labels of each adjacent node by the corresponding arc weight, and filters the intermediate labels. Finally, \textsc{Couple} forms $\mathcal{Y}^{\downarrow}(u)\oplus\mathcal{Y}^{\uparrow}(u)$ for every $u\in\mathcal{L}_c$ and merges it into a running frontier by filtering dominated labels, resulting in the exact Pareto frontier $\mathcal{Y}_N$.
 
-% To extract this exact PF $\mathcal{Y}_N$ from an exact decision diagram $\mathcal{D}$, we can employ \emph{bidirectional PF enumeration}, which dynamically interleaves root-side and terminal-side layer expansion, as detailed in \Cref{alg:bidir_pf}. This dynamic layer cutset methodology mitigates intermediate node-frontier growth. Initially, a root-side layer pointer $i_{\text{td}}$ is set to layer 1 and a terminal-side pointer $i_{\text{bu}}$ is set to layer $n+1$. At each step, the scheme dynamically decides whether to expand the root-side node frontiers $\mathcal{Y}^{\downarrow}$ to layer $i_{\text{td}}+1$ or the terminal-side node frontiers $\mathcal{Y}^{\uparrow}$ to layer $i_{\text{bu}}-1$. This process continues until the two directions meet at a \emph{cutset} layer $c$ (i.e., $i_{\text{td}} = i_{\text{bu}}$). Finally, for each node $u \in \mathcal{L}_c$, the algorithm computes the pairwise sums of labels in its root-side and terminal-side node frontiers (\Cref{alg:bidir_pf}, line 35). The merging of these combined sets and the repeated application of a dominance filter produce the exact PF $\mathcal{Y}_N$.
-
-During enumeration, each DD node stores a \emph{node frontier}, a nondominated set of objective vectors associated with the partial paths through that node. We write $\mathcal{Y}^{\downarrow}(u)$ for the node frontier of the partial paths from the root $\mathbf{r}$ to node $u$, and $\mathcal{Y}^{\uparrow}(u)$ for the node frontier of the partial paths from $u$ to the terminal $\mathbf{t}$. An individual objective vector in a node frontier is a \emph{label}, and a newly generated label that has not yet been filtered is a \emph{candidate label}. During cutset merging we maintain a \emph{global frontier}, a running nondominated set over complete root-to-terminal labels, which results in exact PF $\mathcal{Y}_N$, after all cutset node frontier have been merged. 
-
-Bidirectional PF enumeration extracts $\mathcal{Y}_N$ from an exact decision diagram $\mathcal{D}$ by interleaving root-side and terminal-side layer expansion (\Cref{alg:bidir_pf}). Interleaving keeps the intermediate node frontiers smaller than expansion from either end alone. A root-side layer pointer $i_{\text{td}}$ starts at layer 1 and a terminal-side pointer $i_{\text{bu}}$ starts at layer $n+1$. Each step expands one side, advancing the root-side node frontiers $\mathcal{Y}^{\downarrow}$ to layer $i_{\text{td}}+1$ or the terminal-side node frontiers $\mathcal{Y}^{\uparrow}$ to layer $i_{\text{bu}}-1$. The two directions meet at the \emph{cutset} layer $c$, where $i_{\text{td}} = i_{\text{bu}}$. For each node $u \in \mathcal{L}_c$, the algorithm forms the pairwise sums of the labels in its root-side and terminal-side node frontiers (\Cref{alg:bidir_pf}, line 35). Merging these sets into the global frontier and discarding the dominated labels yields $\mathcal{Y}_N$.
-
-\section{Parallel Enumeration of Pareto Frontier using Decision Diagrams}
+\section{Parallel Pareto-Frontier Enumeration with Decision Diagrams}
 \label{sec:method}
-\label{sec:method_rewrite}
-
-This section describes how we parallelize exact Pareto frontier enumeration on a decision diagram (DD), following the bidirectional PF enumeration scheme in \Cref{alg:bidir_pf}. The rule that chooses which side of the cutset to expand is inherited from the serial enumeration method. Our contribution is the parallel execution of the expensive primitives inside the enumeration: candidate generation, dominance filtering, cutset-product materialization, and frontier merging.
+This section presents parallel CPU and GPU implementations of bidirectional PF enumeration. Both implementations preserve the algorithmic structure of \Cref{alg:bidir_pf}, including its initialization, layer-selection rule, and stopping condition, and differ only in how the underlying frontier operations are executed. 
+\Cref{sec:parallel_primitives} identifies the main sources of parallelism, while \Cref{sec:cpu_impl,sec:gpu_impl} describe how these operations are realized on the CPU and GPU, respectively.
 
 \subsection{Sources of Parallelism}
-\label{sec:parallel_primitives_rewrite}
+\label{sec:parallel_primitives}
 
-The opportunities for parallelism are most easily seen directly from Algorithm~\ref{alg:bidir_pf}. In the root-side expansion, the loop over nodes in line~5 can be parallelized because the node frontier of each destination node is updated independently once the previous layer has been finalized. The same observation applies to the terminal-side expansion in line~14. The work performed inside a node consists of scanning adjacent arcs, generating candidate labels, merging them into the node frontier, and applying the dominance filter in lines~7 and~17.
+The first source of parallelism is across nodes during \textsc{ExpandLayer}. Once the preceding top-down or bottom-up layer has been finalized, each node frontier in the selected layer depends only on read-only frontiers from the adjacent layer. The node-frontier updates are therefore independent. This coarse-grained decomposition is well suited to the CPU, where one worker can own a node frontier, scan its incident arcs, and filter the intermediate labels.
 
-There is a second, finer level of parallelism inside lines~7 and~17. The candidate labels generated for a node can be materialized independently, and the pairwise dominance comparisons among those candidate labels can also be distributed. This finer decomposition requires an explicit candidate buffer and a careful layout so that different workers write to disjoint locations. It is therefore a different implementation choice from assigning one worker to own an entire node frontier.
+The second source is within a node-frontier update. Each arc-label pair generates one candidate independently, and the pairwise dominance comparisons among candidates assigned to the same node can also be distributed. Exploiting this finer granularity requires explicit candidate buffers and offsets that assign disjoint output locations to workers. The GPU backend uses this decomposition to parallelize both candidate generation and dominance filtering.
 
-The cutset phase exposes a separate form of parallelism. In lines~31--33, each cutset node $u \in \mathcal{L}_c$ contributes the product set
-\[
-    \mathcal{Y}^{\downarrow}(u) \oplus \mathcal{Y}^{\uparrow}(u)
-    =
-    \{\mathbf{y}^{\downarrow} + \mathbf{y}^{\uparrow}
-    \mid
-    \mathbf{y}^{\downarrow} \in \mathcal{Y}^{\downarrow}(u),
-    \mathbf{y}^{\uparrow} \in \mathcal{Y}^{\uparrow}(u)\}.
-\]
-These products are independent across cutset nodes and across pairs of labels within a node. The final merge in lines~34--36 is different: it is a reduction over nondominated sets. Node frontiers produced at the cutset must be combined while discarding points dominated by already retained points.
+The third source arises in \textsc{Couple}. Each cutset node $u\in\mathcal{L}_c$ contributes the product set
+  \[
+      \mathcal{Y}^{\downarrow}(u) \oplus \mathcal{Y}^{\uparrow}(u)
+      =
+      \{\mathbf{y}^{\downarrow} + \mathbf{y}^{\uparrow}
+      \mid
+      \mathbf{y}^{\downarrow} \in \mathcal{Y}^{\downarrow}(u),
+      \mathbf{y}^{\uparrow} \in \mathcal{Y}^{\uparrow}(u)\}.
+  \]
+Product sets can be generated independently across cutset nodes and, within each node, across pairs of labels. The global Pareto frontier is then obtained by computing the nondominated union of these sets. We parallelize both stages, using backend-specific strategies for aggregating the resulting frontiers on the CPU and GPU.
 
-\subsection{CPU Implementation}
-\label{sec:cpu_impl_rewrite}
+\subsection{CPU Parallelization}
+\label{sec:cpu_impl}
 
-The CPU bidirectional PF enumeration implementation parallelizes the node loops in Algorithm~\ref{alg:bidir_pf}. For root-side expansion, this is the loop in line~5; for terminal-side expansion, it is the loop in line~14. The loop is scheduled dynamically because the number of candidate labels can vary substantially across nodes in the same layer.
+The CPU backend parallelizes the node loops in \textsc{ExpandLayer}$_{\mathrm{CPU}}$ using OpenMP. We use dynamic scheduling to balance the workload across threads, since the cost of processing a node depends on both its number of incident arcs and the number of labels propagated through those arcs, which can differ substantially among nodes in the same layer.
 
-Each CPU worker owns the node frontier of the node it is assigned. It scans the relevant arcs, generates candidate labels, merges them into the node frontier, and applies the dominance filter corresponding to lines~7 and~17. Since no other worker mutates that node frontier, the implementation avoids locks. The limitation is that a single large node remains serial within one worker; the CPU implementation does not split the dominance filtering of one node across multiple workers.
+Each worker has exclusive ownership of its assigned node frontier. It processes the incident arcs sequentially, shifts the adjacent labels by each arc weight, and incrementally merges and filters the resulting candidates. No other worker mutates that frontier, so node-frontier updates require no locks. This design does not subdivide a single node frontier: a node with substantially more labels than the others remains serial within one worker.
 
-The CPU also parallelizes the cutset products in lines~31--33. Each worker processes a subset of cutset nodes and builds a private cutset frontier from the products $\mathcal{Y}^{\downarrow}(u) \oplus \mathcal{Y}^{\uparrow}(u)$. The final merge in lines~34--36 is implemented as the pairwise tree reduction shown in \Cref{alg:cpu_tree_reduction}. This exposes parallelism in the global merge while keeping each node-frontier update thread-local.
+The \textsc{Couple}$_{\mathrm{CPU}}$ assigns cutset nodes dynamically to workers. Each worker builds a private frontier by combining $\mathcal{Y}^{\downarrow}(u)$ and $\mathcal{Y}^{\uparrow}(u)$ for its assigned nodes. The private frontiers are then merged by the pairwise tree reduction in \Cref{app:cpu_implementation}, \Cref{alg:cpu_tree_reduction}. This exposes parallelism in the final reduction while keeping all intermediate frontier updates local to a worker.
 
-\subsection{GPU Implementation}
-\label{sec:gpu_impl_rewrite}
+\subsection{GPU Parallelization}
+\label{sec:gpu_impl}
 
-The GPU implementation follows the same enumeration logic as Algorithm~\ref{alg:bidir_pf}, but changes the unit of work. Rather than assigning one worker to own a node frontier, it materializes candidate labels in flat buffers and then applies data-parallel filtering and compaction kernels. The high-level procedure is shown in \Cref{alg:gpu_bidir_pf}: the DD is first flattened, each selected layer expansion invokes the same four-kernel pipeline, and the cutset phase is handled by a separate batched cutset-merge routine.
+Algorithm~\ref{alg:gpu_bidir_pf} presents the GPU parallelization of bidirectional PF enumeration. The DD is first converted into a flat representation suitable for GPU processing, after which layer expansion and cutset coupling are performed by \textsc{ExpandLayer}$_{\mathrm{GPU}}$ and \textsc{Couple}$_{\mathrm{GPU}}$, respectively.
+Unlike the CPU implementation, the GPU materializes candidates in flat buffers and applies data-parallel filtering and compaction. 
+% The candidate batch limit $B_{\max}^{\mathrm{cand}}$ bounds the temporary storage used during layer expansion, while the product batch limit $B_{\max}^{\mathrm{prod}}$ controls the cutset products materialized at once.
 
 
 \begin{algorithm}[t!]
@@ -448,7 +307,8 @@ The GPU implementation follows the same enumeration logic as Algorithm~\ref{alg:
 \begin{algorithmic}[1]
 \Require Exact decision diagram
 $\mathcal{D}=(\mathcal{N},\mathcal{A})$;
-candidate batch limit $B_{\max}$
+candidate batch limit $B_{\max}^{\mathrm{cand}}$;
+cutset-product batch limit $B_{\max}^{\mathrm{prod}}$
 
 \Procedure{FlattenDD}{$\mathcal{D}$}
     \For{$j=1$ \textbf{to} $n+1$}
@@ -491,24 +351,46 @@ candidate batch limit $B_{\max}$
     {\mathcal{Y},b,\phi^a}$
 
     \State
-    $\beta
-    \gets
-    \Call{ExpandCandidates}
-    {\mathcal{Y},b,\mathbf{v},\phi^c,\kappa}$
+    Partition $\mathcal{L}_j$ into candidate batches
+    $\mathcal{Q}_1,\mathcal{Q}_2,\dots$
+    such that
+    $\sum_{v\in\mathcal{Q}_k}\Gamma_v
+    \le B_{\max}^{\mathrm{cand}}$
 
     \State
-    $\sigma
-    \gets
-    \Call{SegmentedFilterDominated}
-    {\beta,\Gamma}$
+    $\mathcal{Y}^{\mathrm{next}}\gets\emptyset$
 
-    \State
-    $\mathcal{Y}
-    \gets
-    \Call{CompactSurvivors}
-    {\beta,\sigma,\Gamma}$
+    \For{\textbf{each} candidate batch $\mathcal{Q}$}
+        \State Restrict
+        $(b,\mathbf{v},\phi^c,\kappa,\Gamma)$
+        to $\mathcal{Q}$
 
-    \State \Return $\mathcal{Y}$
+        \State
+        $\beta_{\mathcal{Q}}
+        \gets
+        \Call{ExpandCandidates}
+        {\mathcal{Y},b,\mathbf{v},\phi^c,\kappa}$
+
+        \State
+        $\sigma_{\mathcal{Q}}
+        \gets
+        \Call{FilterDominated}
+        {\beta_{\mathcal{Q}},\Gamma}$
+
+        \State
+        $\mathcal{Y}_{\mathcal{Q}}
+        \gets
+        \Call{CompactSurvivors}
+        {\beta_{\mathcal{Q}},\sigma_{\mathcal{Q}}}$
+
+        \State
+        $\mathcal{Y}^{\mathrm{next}}
+        \gets
+        \mathcal{Y}^{\mathrm{next}}\cup
+        \mathcal{Y}_{\mathcal{Q}}$
+    \EndFor
+
+    \State \Return $\mathcal{Y}^{\mathrm{next}}$
 \EndProcedure
 
 \Procedure{Couple$_{\mathrm{GPU}}$}
@@ -559,22 +441,20 @@ candidate batch limit $B_{\max}$
     $\sum_{v\in\mathcal{B}_k}
     \kappa_v^{\downarrow}
     \kappa_v^{\uparrow}
-    \le B_{\max}$
+    \le B_{\max}^{\mathrm{prod}}$
 
     \For{\textbf{each} batch $\mathcal{B}$}
         \State
         $\beta
         \gets
         \Call{MaterializeProducts}
-        {\mathcal{Y}^{\downarrow},
-         \mathcal{Y}^{\uparrow},
-         \mathcal{B}}$
+        {\mathcal{B}}$
 
         \If{$\mathcal{Y}^{\mathrm{global}}\neq\emptyset$}
             \State
             $\sigma
             \gets
-            \Call{FilterAgainstFrontier}
+            \Call{FilterAgainst}
             {\beta,\mathcal{Y}^{\mathrm{global}}}$
 
             \State
@@ -605,25 +485,24 @@ candidate batch limit $B_{\max}$
 \end{algorithmic}
 \end{algorithm}
 
-The flattened representation stores, for each layer and traversal direction, the relevant source or destination node index for each arc, the arc weight vector, and a per-node arc-offset array. This layout makes each layer expansion a segmented operation over contiguous arc and candidate arrays. The representation is built once and reused throughout the enumeration.
+For each layer $j$ and traversal direction $d\in\{\downarrow,\uparrow\}$, the flattened representation stores the arc weights $\mathbf{b}_j^d$, the corresponding node indices $\mathbf{v}_j^d$, and the per-node arc offsets $\boldsymbol{\phi}_{a,j}^d$, together with the node degrees $\boldsymbol{\delta}_j^{\mathrm{in}}$ and $\boldsymbol{\delta}_j^{\mathrm{out}}$. These arrays are constructed once and reused throughout enumeration. In particular, the offsets $\boldsymbol{\phi}_{a,j}^d$ organize the arcs incident to each node into contiguous segments, allowing each layer expansion to operate on contiguous regions of the arc and candidate arrays.
 
-For a selected layer, \Cref{alg:gpu_bidir_pf} calls the four subroutines in \Cref{alg:compute_arc_offsets,alg:expand_candidates,alg:dynamic_1D_kernel,alg:compact_survivors}. The dataflow is
-\[
-    \mathcal{Y}
-    \rightarrow (\kappa,\phi^c,\Gamma)
-    \rightarrow \beta
-    \rightarrow \sigma
-    \rightarrow \mathcal{Y}_{\mathrm{next}}.
-\]
-Here $\kappa_a$ is the number of candidate labels generated by arc $a$, $\phi^c_a$ is the starting offset of arc $a$ in the flat candidate buffer, and $\Gamma_v$ is the total number of candidate labels assigned to destination node $v$. The buffer $\beta$ stores the generated candidate labels, and the binary vector $\sigma$ marks the labels that survive node-frontier dominance filtering.
+For a selected layer, \textsc{ExpandLayer}$_{\mathrm{GPU}}$ partitions the destination nodes into batches whose candidate counts are bounded by $B_{\max}^{\mathrm{cand}}$. Within each batch $\mathcal{Q}$, it calls the four subroutines detailed in \Cref{app:gpu_implementation}, \Cref{alg:compute_arc_offsets,alg:expand_candidates,alg:dynamic_1D_kernel,alg:compact_survivors}. 
+% The dataflow is
+% \[
+%     \mathcal{Y}
+%     \rightarrow (\kappa,\phi^c,\Gamma)
+%     \rightarrow \beta_{\mathcal{Q}}
+%     \rightarrow \sigma_{\mathcal{Q}}
+%     \rightarrow \mathcal{Y}^{\mathrm{next}}(\mathcal{Q}).
+% \]
+Here $\kappa_a$ is the number of candidates generated by arc $a$, $\phi^c_a$ is the starting offset of that arc in the candidate buffer, and $\Gamma_v$ is the number of candidates assigned to node $v$. The buffer $\beta_{\mathcal{Q}}$ stores the candidates for batch $\mathcal{Q}$, and $\sigma_{\mathcal{Q}}$ marks those that survive dominance filtering.
 
-First, \Cref{alg:compute_arc_offsets} counts how many candidate labels each arc will produce and uses a prefix sum to assign disjoint output segments in $\beta$. Second, \Cref{alg:expand_candidates} fills this buffer with shifted labels. The prefix-sum offsets are the key invariant: candidate labels generated by different arcs write to disjoint memory, but candidate labels for the same destination node occupy one contiguous segment. Third, \Cref{alg:dynamic_1D_kernel} filters each destination-node segment using a load-balanced grid of thread blocks; nodes with larger candidate label sets receive more blocks. Fourth, \Cref{alg:compact_survivors} compacts the surviving labels into the next node-frontier representation. These four steps implement the parallelization of candidate generation, merging, and dominance filtering in lines~7 and~17 of Algorithm~\ref{alg:bidir_pf}.
+First, \Cref{alg:compute_arc_offsets} counts the candidates generated by each arc and uses a prefix sum to assign disjoint output segments. Second, \Cref{alg:expand_candidates} materializes the shifted labels for the current batch. Candidates generated by different arcs occupy disjoint memory, while candidates assigned to the same node form one contiguous segment. Third, \Cref{alg:dynamic_1D_kernel} filters each node segment using a load-balanced grid of thread blocks, assigning more blocks to larger segments. Fourth, \Cref{alg:compact_survivors} compacts the surviving labels into the next node-frontier representation.
 
-\revE{This candidate-then-filter ordering is a deliberate choice rather than the only option. An alternative would check each candidate against the running frontier as soon as it is generated and store only the survivors, avoiding the flat candidate buffer entirely. Our CPU implementation already does this: each incoming arc's label set is folded into the destination node's frontier immediately, checked only against the frontier accumulated so far, with no separate step that first materializes every candidate for a node. On the GPU we deliberately do the opposite, because incremental insertion has an inherent sequential dependency --- each candidate's insert-or-discard decision depends on the current state of the retained set, and the next candidate may need to check against, or evict, something the previous candidate just inserted. Enforcing that ordering across thousands of GPU threads means serializing them around one shared retained set, which buys nothing over a single thread doing it while adding synchronization overhead. Materializing the batch first instead turns candidate generation and dominance filtering into two independent, embarrassingly parallel phases, at the cost of temporary memory for the candidate buffer, the same throughput-for-memory trade-off that makes the GPU faster but more memory-bound than the CPU.}
+The candidate-then-filter ordering distinguishes the GPU backend from the CPU backend. A CPU worker can incrementally insert candidates into the frontier it owns. On the GPU, however, each insertion would depend on the current retained set and would therefore serialize updates to a shared node frontier. Materializing a batch first removes this dependency from candidate generation and exposes the dominance comparisons in the subsequent filtering stage. The resulting parallelism comes at the cost of temporary candidate storage, which is controlled by $B_{\max}^{\mathrm{cand}}$.
 
-The cutset phase uses a different schedule, shown in \Cref{alg:gpu_cutset_merge}. Active cutset nodes are those with nonempty root-side and terminal-side node frontiers. They are sorted by node-frontier size and processed in product-bounded batches so that the Cartesian product for a batch fits in memory. For each batch, \Cref{alg:materialize_cutset_products} materializes all sums $\mathbf{y}^{\downarrow}+\mathbf{y}^{\uparrow}$ corresponding to lines~31--33 of Algorithm~\ref{alg:bidir_pf}. The batch is then filtered against the current global frontier, self-pruned, and merged into the running global frontier. Thus the GPU does not use the CPU tree reduction in \Cref{alg:cpu_tree_reduction}; it uses a batched running-frontier merge, where batching is both a load-balancing mechanism and a memory-control mechanism.
-
-Batching does not change the set being computed. After each batch is processed, the running frontier is the nondominated union of all cutset products seen so far. Filtering a new batch against this frontier removes points already dominated by earlier batches, and the final mutual merge removes earlier points dominated by the new survivors. The result is therefore the same nondominated union over all active cutset nodes, but evaluated with bounded intermediate memory.
+\textsc{Couple}$_{\mathrm{GPU}}$ in \Cref{alg:gpu_bidir_pf} uses a separate schedule. It sorts the nodes in descending order of the sum of their frontier cardinalities, and partitions them into batches containing at most $B_{\max}^{\mathrm{prod}}$ products. For each batch, \Cref{alg:materialize_cutset_products} materializes the pairwise sums, which are filtered against the current global frontier, self-pruned, and merged into that frontier. Unlike the CPU backend, the GPU therefore uses a batched running-frontier merge rather than a tree reduction. Batching does not change the result. After each batch, the global frontier is the nondominated union of all cutset products processed so far. Filtering a new batch against this frontier removes labels dominated by earlier batches, while the subsequent merge removes earlier labels dominated by the new survivors. The final set is therefore the same nondominated union over all active cutset nodes, computed with bounded product materialization.
 
 \section{Computational Experiments}
 \label{sec:results}
@@ -637,8 +516,8 @@ Our computational evaluation aims to answer the following key research questions
     \setlength{\parsep}{0pt}
 }
     \item \textbf{MIP vs. Serial DD:} How does serial DD-based Pareto frontier enumeration compare with MIP baselines in runtime and scalability?
-    \item \textbf{Serial DD vs. Parallel DD on CPU:} How much speedup does the parallel CPU DD implementation provide over serial DD?
-    \item \textbf{Parallel DD on CPU vs. GPU:} How does the GPU DD implementation compare with the parallel CPU DD variant in runtime and robustness?
+    \item \textbf{Serial DD vs. \textsc{PmddC}:} How much speedup does the parallel CPU DD implementation provide over serial DD?
+    \item \textbf{\textsc{PmddC} vs. \textsc{PmddG}:} How does the GPU DD implementation compare with the parallel CPU DD variant in runtime and robustness?
 \end{list}
 
 \subsection{Experimental Setup}
@@ -857,10 +736,10 @@ This execution model is well suited for workloads dominated by large numbers of 
 
 This appendix gives pseudocode for implementation details referenced in the main text but omitted there for space. The CPU detail is the pairwise reduction used to merge private cutset frontiers. The GPU details are the lower-level kernels used by Algorithm~\ref{alg:gpu_bidir_pf}.
 
-\subsection{CPU Implementation}
+\subsection{CPU Parallelization}
 \label{app:cpu_implementation}
 
-The CPU implementation uses the tree reduction in \Cref{alg:cpu_tree_reduction} to merge private cutset frontiers produced by different workers. This is the reduction referred to in \Cref{sec:cpu_impl_rewrite}.
+The CPU implementation uses the tree reduction in \Cref{alg:cpu_tree_reduction} to merge private cutset frontiers produced by different workers. This is the reduction referred to in \Cref{sec:cpu_impl}.
 
 \begin{algorithm}[htbp]
 \caption{CPU Tree Reduction for Cutset Frontiers}
@@ -883,10 +762,10 @@ The CPU implementation uses the tree reduction in \Cref{alg:cpu_tree_reduction} 
 \end{algorithmic}
 \end{algorithm}
 
-\subsection{GPU Implementation}
+\subsection{GPU Parallelization}
 \label{app:gpu_implementation}
 
-The GPU implementation expands each selected layer through the four-kernel pipeline described in \Cref{sec:gpu_impl_rewrite}. \Cref{alg:compute_arc_offsets} computes per-arc candidate counts and buffer offsets. \Cref{alg:expand_candidates} then materializes shifted candidate labels in the assigned buffer segments. \Cref{alg:dynamic_1D_kernel} performs load-balanced dominance filtering, and \Cref{alg:compact_survivors} compacts the surviving labels into the next node-frontier representation. Finally, \Cref{alg:materialize_cutset_products} materializes the batched cutset products used by \Cref{alg:gpu_cutset_merge}.
+The GPU implementation expands each selected layer through the four-kernel pipeline described in \Cref{sec:gpu_impl}. \Cref{alg:compute_arc_offsets} computes per-arc candidate counts and buffer offsets. \Cref{alg:expand_candidates} then materializes shifted candidate labels in the assigned buffer segments. \Cref{alg:dynamic_1D_kernel} performs load-balanced dominance filtering, and \Cref{alg:compact_survivors} compacts the surviving labels into the next node-frontier representation. Finally, \Cref{alg:materialize_cutset_products} materializes the batched cutset products used by \textsc{Couple}$_{\mathrm{GPU}}$ in \Cref{alg:gpu_bidir_pf}.
 
 
 \Cref{alg:expand_candidates} uses the offsets from \Cref{alg:compute_arc_offsets} to write every generated candidate into a disjoint location of the flat buffer.
