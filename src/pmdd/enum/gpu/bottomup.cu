@@ -279,14 +279,16 @@ bool expand_layer_frontiers(
     if (!sync_kernel("edge_counts", reason))
         return false;
 
-    thrust::exclusive_scan(d_edge_counts.begin(), d_edge_counts.end(), d_edge_offsets.begin());
-    const int last_offset = d_edge_offsets[num_edges - 1];
-    const int last_count = d_edge_counts[num_edges - 1];
-    const int total_candidates = last_offset + last_count;
+    // §1.2: inclusive-scan into offsets[1..num_edges] leaves offsets[0]=0 (from the
+    // zero-init above) and lands the running total in offsets[num_edges] on-device, so
+    // the final slot needs no host->device write. Read the total back exactly once (the
+    // host must branch on it just below), replacing 2 D2H reads + 1 H2D write with 1 D2H.
+    thrust::inclusive_scan(d_edge_counts.begin(), d_edge_counts.end(),
+                           d_edge_offsets.begin() + 1);
+    const int total_candidates = d_edge_offsets[num_edges];
     if (total_candidates_out != NULL) {
         *total_candidates_out = total_candidates;
     }
-    d_edge_offsets[num_edges] = total_candidates;
 
     if (total_candidates == 0) {
         d_next_points.clear();
@@ -350,12 +352,10 @@ bool expand_layer_frontiers(
             thrust::device_vector<int> d_batch_in_offsets = h_batch_in_offsets;
             thrust::device_vector<int> d_batch_edge_offsets(batch_edges + 1, 0);
 
-            thrust::exclusive_scan(d_edge_counts.begin() + edge_begin,
-                                   d_edge_counts.begin() + edge_end, d_batch_edge_offsets.begin());
-            const int batch_last_offset = d_batch_edge_offsets[batch_edges - 1];
-            const int batch_last_count = d_edge_counts[edge_end - 1];
-            const int batch_total_candidates = batch_last_offset + batch_last_count;
-            d_batch_edge_offsets[batch_edges] = batch_total_candidates;
+            thrust::inclusive_scan(d_edge_counts.begin() + edge_begin,
+                                   d_edge_counts.begin() + edge_end,
+                                   d_batch_edge_offsets.begin() + 1);
+            const int batch_total_candidates = d_batch_edge_offsets[batch_edges];
             if (batch_total_candidates <= 0) {
                 dst_begin = dst_end;
                 continue;
@@ -399,11 +399,8 @@ bool expand_layer_frontiers(
                                                     thrust::maximum<int>());
             if (max_seg_size > 0) {
                 thrust::device_vector<int> d_batch_block_offsets(batch_nodes + 1, 0);
-                thrust::exclusive_scan(d_batch_blocks.begin(), d_batch_blocks.end(),
-                                       d_batch_block_offsets.begin());
-                d_batch_block_offsets[batch_nodes] =
-                    thrust::reduce(d_batch_blocks.begin(), d_batch_blocks.end(), 0);
-
+                thrust::inclusive_scan(d_batch_blocks.begin(), d_batch_blocks.end(),
+                                       d_batch_block_offsets.begin() + 1);
                 const int total_blocks = d_batch_block_offsets[batch_nodes];
                 if (total_blocks > 0) {
                     mark_local_dominated_kernel<<<total_blocks, kThreadsPerBlock>>>(
@@ -455,8 +452,10 @@ bool expand_layer_frontiers(
             *std_survivors_out = population_std_from_device_counts(d_next_sizes);
         }
 
-        thrust::exclusive_scan(d_next_sizes.begin(), d_next_sizes.end(), d_next_offsets.begin());
-        d_next_offsets[next_nodes] = total_next;
+        // §1.2: inclusive-scan into offsets[1..next_nodes]; offsets[next_nodes] then
+        // holds total_next on-device (equal to the host total_next above), no H2D write.
+        thrust::inclusive_scan(d_next_sizes.begin(), d_next_sizes.end(),
+                               d_next_offsets.begin() + 1);
         return true;
     }
 
@@ -487,9 +486,8 @@ bool expand_layer_frontiers(
         thrust::reduce(d_cand_counts.begin(), d_cand_counts.end(), 0, thrust::maximum<int>());
     if (max_seg_size > 0) {
         thrust::device_vector<int> d_block_offsets(next_nodes + 1, 0);
-        thrust::exclusive_scan(d_dst_blocks.begin(), d_dst_blocks.end(), d_block_offsets.begin());
-        d_block_offsets[next_nodes] = thrust::reduce(d_dst_blocks.begin(), d_dst_blocks.end(), 0);
-
+        thrust::inclusive_scan(d_dst_blocks.begin(), d_dst_blocks.end(),
+                               d_block_offsets.begin() + 1);
         const int total_blocks = d_block_offsets[next_nodes];
         if (total_blocks > 0) {
             mark_local_dominated_kernel<<<total_blocks, kThreadsPerBlock>>>(
@@ -515,8 +513,10 @@ bool expand_layer_frontiers(
         *std_survivors_out = population_std_from_device_counts(d_next_sizes);
     }
 
-    thrust::exclusive_scan(d_next_sizes.begin(), d_next_sizes.end(), d_next_offsets.begin());
-    d_next_offsets[next_nodes] = total_next;
+    // §1.2: inclusive-scan into offsets[1..next_nodes]; offsets[next_nodes] then holds
+    // total_next on-device (equal to the host total_next above), no H2D write.
+    thrust::inclusive_scan(d_next_sizes.begin(), d_next_sizes.end(),
+                           d_next_offsets.begin() + 1);
 
     d_next_points.resize(total_next * NOBJS);
     if (total_next > 0) {

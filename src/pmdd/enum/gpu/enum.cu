@@ -205,8 +205,9 @@ ParetoFrontier *enumerate_mdd_topdown(MDD *mdd, EnumerationStats *stats, std::st
     h_td_sizes[root_idx] = 1;
     thrust::device_vector<int> d_td_sizes = h_td_sizes;
     thrust::device_vector<int> d_td_offsets(root_nodes + 1, 0);
-    thrust::exclusive_scan(d_td_sizes.begin(), d_td_sizes.end(), d_td_offsets.begin());
-    d_td_offsets[root_nodes] = 1;
+    // §1.2: inclusive-scan into offsets[1..]; offsets[root_nodes] then holds the total
+    // (1) on-device, removing the single-element H2D write.
+    thrust::inclusive_scan(d_td_sizes.begin(), d_td_sizes.end(), d_td_offsets.begin() + 1);
     thrust::device_vector<ObjType> d_td_points(NOBJS, 0); // single point (0,0...)
 
     // 3. Expand layer by layer
@@ -327,8 +328,9 @@ ParetoFrontier *enumerate_mdd_coupled(MDD *mdd, EnumerationStats *stats, std::st
     h_td_sizes[root_idx] = 1;
     thrust::device_vector<int> d_td_sizes = h_td_sizes;
     thrust::device_vector<int> d_td_offsets(root_nodes + 1, 0);
-    thrust::exclusive_scan(d_td_sizes.begin(), d_td_sizes.end(), d_td_offsets.begin());
-    d_td_offsets[root_nodes] = 1;
+    // §1.2: inclusive-scan into offsets[1..]; offsets[root_nodes] then holds the total
+    // (1) on-device, removing the single-element H2D write.
+    thrust::inclusive_scan(d_td_sizes.begin(), d_td_sizes.end(), d_td_offsets.begin() + 1);
     thrust::device_vector<ObjType> d_td_points(NOBJS, 0);
 
     const int term_layer = num_layers - 1;
@@ -339,8 +341,7 @@ ParetoFrontier *enumerate_mdd_coupled(MDD *mdd, EnumerationStats *stats, std::st
     h_bu_sizes[term_idx] = 1;
     thrust::device_vector<int> d_bu_sizes = h_bu_sizes;
     thrust::device_vector<int> d_bu_offsets(term_nodes + 1, 0);
-    thrust::exclusive_scan(d_bu_sizes.begin(), d_bu_sizes.end(), d_bu_offsets.begin());
-    d_bu_offsets[term_nodes] = 1;
+    thrust::inclusive_scan(d_bu_sizes.begin(), d_bu_sizes.end(), d_bu_offsets.begin() + 1);
     thrust::device_vector<ObjType> d_bu_points(NOBJS, 0);
 
     // 3. Dynamic layer selection loop (all data stays on GPU)
@@ -625,8 +626,9 @@ ParetoFrontier *coupled_bdd_cuda_enumerate(BDD *bdd, bool maximization, const in
     h_td_sizes[root_idx] = 1;
     thrust::device_vector<int> d_td_sizes = h_td_sizes;
     thrust::device_vector<int> d_td_offsets(root_nodes + 1, 0);
-    thrust::exclusive_scan(d_td_sizes.begin(), d_td_sizes.end(), d_td_offsets.begin());
-    d_td_offsets[root_nodes] = 1;
+    // §1.2: inclusive-scan into offsets[1..]; offsets[root_nodes] then holds the total
+    // (1) on-device, removing the single-element H2D write.
+    thrust::inclusive_scan(d_td_sizes.begin(), d_td_sizes.end(), d_td_offsets.begin() + 1);
     thrust::device_vector<ObjType> d_td_points(NOBJS, 0);
 
     const int term_layer = num_layers - 1;
@@ -637,8 +639,7 @@ ParetoFrontier *coupled_bdd_cuda_enumerate(BDD *bdd, bool maximization, const in
     h_bu_sizes[term_idx] = 1;
     thrust::device_vector<int> d_bu_sizes = h_bu_sizes;
     thrust::device_vector<int> d_bu_offsets(term_nodes + 1, 0);
-    thrust::exclusive_scan(d_bu_sizes.begin(), d_bu_sizes.end(), d_bu_offsets.begin());
-    d_bu_offsets[term_nodes] = 1;
+    thrust::inclusive_scan(d_bu_sizes.begin(), d_bu_sizes.end(), d_bu_offsets.begin() + 1);
     thrust::device_vector<ObjType> d_bu_points(NOBJS, 0);
 
     // 3. Dynamic layer selection loop (all data stays on GPU)
