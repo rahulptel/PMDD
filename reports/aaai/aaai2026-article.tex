@@ -20,7 +20,7 @@
 \setcounter{secnumdepth}{2}
 
 \usepackage{algorithm}
-\usepackage{algpseudocode}
+\usepackage[noend]{algpseudocode}
 \usepackage{amsmath}
 \usepackage{amssymb}
 \usepackage{longtable}
@@ -30,10 +30,7 @@
 \usetikzlibrary{positioning, fit, backgrounds, calc, decorations.pathreplacing}
 \usepackage{multirow}
 
-% \title{Parallel Decision Diagrams-based Multiobjective Discrete Optimization} %TODO Please add
 \title{Parallel Multiobjective Decision Diagrams} %TODO Please add
-
-% \title{\method{}: GPU-Accelerated Multiobjective Discrete Optimization using Decision Diagrams} %TODO Please add
 
 \author{
 Rahul Patel\textsuperscript{},
@@ -69,127 +66,342 @@ The code is available at \url{https://anonymous.4open.science/r/DD-C683/}.
 
 Many discrete optimization problems that arise in sustainability~\citep{flecker2022reducing}, finance~\citep{bonami2009exact}, healthcare~\citep{ehrgott2010mathematical}, routing~\citep{kovacs2015multi}, to name a few, are inherently multiobjective. In vehicle routing, for example, a dispatcher might need to balance the routing cost and service quality. As these goals conflict, no single plan is best in terms of cost and service quality at once. To compare different plans we use the principle of \emph{Pareto dominance}, where one solution dominates another if it matches it on every objective and improves on at least one. The goal of exact multiobjective optimization~\citep{ehrgott2005multicriteria,ehrgott2016exact,miettinen1999nonlinear} is to enumerate all nondominated solutions, i.e., the \emph{Pareto frontier} (PF), since each one represents a distinct trade-off a decision-maker might prefer over the rest. 
 
-We focus on multiobjective discrete optimization problems with linear objectives
-and constraints.
-Exact methods for solving these problems are conventionally built on top of an integer linear programming (ILP) solver and fall into two families~\citep{halffmann2022exact}. \emph{Decision-space} methods search the space of feasible assignments, extending single-objective branch-and-bound with dominance-based pruning: a node is discarded only when its bound set is dominated by the incumbent frontier. The success of these methods depend heavily on the quality of the bound sets. A poor quality bound set might lead to more branching and make the search. \emph{Objective-space} methods instead search the image of the feasible set. They repeatedly solve scalarized single-objective ILPs restricted to a region of the objective space, remove the region dominated by each new nondominated point, and recurse on what remains. Objective-space methods treat the ILP solver as a black box and call it once per region, so the number of \emph{independent} NP-hard solves grows with the size of the frontier and, sharply, with the number of objectives. 
-% Both families are also vulnerable to symmetry: equivalent partial assignments appear as distinct subproblems, and branch-and-bound re-explores each of them unless symmetry is broken explicitly.
+% In this work, we focus on multiobjective discrete optimization (MODO) problems with linear objectives and constraints. Exact methods for these problems are conventionally built on top of an integer linear programming (ILP) solver and fall into two families~\citep{halffmann2022exact}. \emph{Decision-space} methods search the space of feasible assignments, extending single-objective branch-and-bound with dominance-based pruning, i.e., a node is discarded only when its bound set is dominated by the incumbent frontier. Their performance therefore rests on the quality of the bound sets, and weak bounds translate directly into more branching. They are also vulnerable to symmetry. Equivalent partial assignments appear as distinct subproblems, and branch-and-bound re-explores each of them unless the symmetry is broken explicitly. \emph{Objective-space} methods search the image of the feasible set instead. They repeatedly solve scalarized single-objective ILPs restricted to a region of the objective space, remove the region dominated by each new nondominated point, and recurse on what remains. The ILP solver is a black box here, called once per region, so the number of independent NP-hard solves grows with the size of the frontier and, sharply, with the number of objectives. Many of these solves are redundant, returning an already known nondominated point or reporting infeasibility.
 
-Decision diagrams (DDs)~\citep{bergman2016decision} offer an alternative to address these problems. A DD is a layered acyclic graph that compactly represents the feasible set of a problem admitting a dynamic programming (DP) formulation: layers correspond to decision variables, nodes to DP states, and arcs to variable assignments, so that solutions correspond one-to-one with root-to-terminal paths. Because partial assignments that reach the same DP state are merged into a single node, symmetric and equivalent subproblems are collapsed rather than re-explored, and the graph itself provides a discrete relaxation whose strength can be controlled through width. DDs have proven effective for single-objective discrete optimization, both as standalone solvers and as a source of bounds~\citep{bergman2016decision}.
+In this work, we consider multiobjective discrete optimization (MODO) problems with linear objectives and constraints. Exact methods are typically built on integer linear programming (ILP) solvers and fall into two families~\citep{halffmann2022exact}. \emph{Decision-space} methods extend single-objective branch-and-bound by pruning a node only when its bound set is dominated by the incumbent frontier. Their performance therefore depends critically on bound quality: weak bounds lead directly to additional branching. They are also susceptible to symmetry, since equivalent partial assignments are treated as distinct subproblems unless symmetry is explicitly broken. \emph{Objective-space} methods instead search the image of the feasible set. They repeatedly solve scalarized ILPs over restricted objective-space regions, remove regions dominated by newly discovered nondominated points, and recurse on the remainder. Because the ILP solver is invoked as a black box for each region, the number of independent NP-hard solves grows with the frontier size and, more sharply, with the number of objectives. Many such solves are redundant, either rediscovering known nondominated points or proving infeasibility.
 
-The same structure carries over to the multiobjective setting. \citet{bergman2016multiobjective} first showed that a PF can be enumerated over an exact DD by propagating sets of nondominated labels top-down through the layers, with a single diagram encoding all objectives at once and each arc carrying a vector of costs. \citet{bergman2022network} then recast MODO as a multicriteria network problem over the DD, which unifies label propagation with network-flow machinery and yields strong performance on problems with several objectives and tens to hundreds of decision variables---outperforming ILP-based enumeration on structured problems such as multiobjective knapsack and shortest path.
+Decision diagrams (DDs) have recently emerged as an effective framework for single-objective discrete optimization~\citep{bergman2016decision}. A DD is a layered acyclic graph that compactly represents the feasible set of a problem with a dynamic programming (DP) formulation. Layers correspond to decision variables, nodes to DP states, and arcs to variable assignments, yielding a one-to-one correspondence between feasible solutions and root-to-terminal paths. By merging partial assignments that reach the same DP state, DDs collapse symmetric and equivalent subproblems rather than re-exploring them.
 
-A DD by itself, however, does not make PF enumeration cheap. Every node stores a nondominated set of labels for the partial paths that reach it. Expanding a layer generates new candidate labels along outgoing arcs, merges them into each destination node's frontier, and discards the ones some other label dominates. This dominance filtering is the dominant cost: in the worst case it compares every candidate at a node against every other candidate, and label sets grow quickly with the number of objectives. Enumeration also works inward from both ends of the diagram, alternating between expanding forward from the root and backward from the terminal until the two meet at a shared middle layer, the \emph{cutset}, where the root-side and terminal-side frontiers are combined and filtered once more. Existing DD-based MODO solvers perform all of this one node and one comparison at a time.
+% \citet{bergman2016multiobjective} extended the use of DDs to solve MODO problems. \citet{bergman2022network} further enhanced this method by incorporating advanced enumeration techniques and state-based label pruning operations. 
+% However, a DD by itself, however, does not make PF enumeration cheap. Every node stores a nondominated set of labels for the partial paths that reach it. Expanding a layer generates new candidate labels along outgoing arcs, merges them into each destination node's frontier, and discards the ones some other label dominates. This dominance filtering is the dominant cost: in the worst case it compares every candidate at a node against every other candidate, and label sets grow quickly with the number of objectives. Enumeration also works inward from both ends of the diagram, alternating between expanding forward from the root and backward from the terminal until the two meet at a shared middle layer, the \emph{cutset}, where the root-side and terminal-side frontiers are combined and filtered once more. Existing DD-based MODO solvers perform all of this one node and one comparison at a time.
 
-This paper studies how to parallelize exact DD-based PF enumeration. While parallelism has been exploited in DDs for single-objective search~\citep{bergman2014parallel,perez2018parallel,tardivo2024cp,tardivo2026gpu}, PF enumeration exposes a different and richer decomposition, because the expensive work is set-valued rather than scalar. Layer expansion can be distributed over nodes; candidate generation and dominance checks can be distributed over labels within a node; and the final cutset merge can be organized as a parallel reduction over nondominated sets. These forms of parallelism map differently to multi-core CPUs and GPUs. CPUs are effective for node-level work sharing and tree-structured frontier reduction, whereas GPUs can expose finer-grained parallelism by materializing candidates in flat buffers and filtering them with data-parallel kernels.
-
-We make the following contributions:
-\begin{itemize}
-    \item We identify where bidirectional PF enumeration decomposes for parallel execution: across nodes within a layer, across labels within a node, and across products and merges in the coupling phase.
-    \item We build a CPU implementation that dynamically schedules node expansion over OpenMP threads and reduces cutset frontiers with a lock-free pairwise tree merge.
-    \item We develop a GPU implementation that flattens the diagram into offset-indexed arc arrays, expands each layer with a four-kernel pipeline, and merges the cutset in memory-bounded batches against a running frontier.
-    \item We evaluate on MOKP, MOSPP, and MOTSP instances with up to seven objectives against a state-of-the-art MIP baseline~\citep{dachert2024simple} and the state-of-the-art serial DD baseline~\citep{bergman2022network}, and show that our parallel CPU and GPU variants cut enumeration time relative to serial DD by up to $7.83\times$ and $20.88\times$ respectively, with the GPU fastest when frontiers fit in device memory and the CPU more reliable when they do not.
-\end{itemize}
-
-- Gently introduce the multiobjective problem and specify that we focus on integer linear problems. 
-- Then talk about existing ILP methods: decision space search and objective space search. 
-- The talk about their limitations.
-
-- Talk about decision diagrams (DDs) and their use in solving discrete optimization problems. 
-- Briefly talk about their advantages over ILP methods: better at handling symmetry leading
-- Then talk about their use to solve multiobjective problems. 
-- Start with the bergman cire 2016 reference and then talk about the bergman 2022 reference.
+\citet{bergman2016multiobjective} extended DDs to MODO, and \citet{bergman2022network} strengthened the framework with improved enumeration and state-based label pruning. PF enumeration nevertheless remains expensive. Each node stores the nondominated labels of the partial paths reaching it. Layer expansion generates labels along outgoing arcs, merges them into destination frontiers, and removes dominated candidates. This dominance filtering is the main computational bottleneck: in the worst case, every candidate at a node is compared with every other, and label sets grow rapidly with the number of objectives. Enumeration proceeds from both ends of the diagram, alternating between forward expansion from the root and backward expansion from the terminal. The two searches meet at a middle layer, the \emph{cutset}, where their frontiers are combined and filtered again. Existing DD-based MODO solvers perform these operations sequentially, one node and one comparison at a time.
+This paper investigates the parallelization of exact DD-based PF enumeration. 
+% Although parallelism has been studied for single-objective DD search~\citep{bergman2014parallel,perez2018parallel,tardivo2024cp,tardivo2026gpu}, PF enumeration exposes distinct opportunities for parallelism because it processes large sets of labels rather than a single scalar value. 
+% Computation can be parallelized across nodes during layer expansion, across labels during candidate generation and dominance filtering, and across nondominated sets during the final cutset merge. These levels of parallelism suit different architectures: multi-core CPUs support node-level work sharing and tree-based frontier reduction, while GPUs exploit finer-grained parallelism through flat candidate buffers and data-parallel filtering kernels.
 
 
-Mixed integer programming (MIP)-based techniques are typically used to enumerate the PF, which can be classified into either decision-space search or objective-space search method \cite{halffmann2022exact}. Recently, decision diagrams (DDs) have emerged as a promising approach to solve single-objective discrete optimization problems \cite{bergman2016decision}. alternative to MIP for exact multiobjective optimization \cite{bergman2016multiobjective,bergman2022network}. DDs are layered acyclic graphs that compactly represent the feasible set of a discrete optimization problem with a dynamic programming structure. The PF can be enumerated by propagating nondominated labels through the DD. However, the dominance filtering at each node is expensive, as it compares every candidate label against every other candidate at that node. Existing DD-based methods perform this filtering serially, which becomes a bottleneck for large problems.
+% We make the following contributions:
+% \begin{itemize}
+%     \item We identify where bidirectional PF enumeration decomposes for parallel execution: across nodes within a layer, across labels within a node, and across products and merges in the coupling phase.
+%     \item We build a CPU implementation that dynamically schedules node expansion over OpenMP threads and reduces cutset frontiers with a lock-free pairwise tree merge.
+%     \item We develop a GPU implementation that flattens the diagram into offset-indexed arc arrays, expands each layer with a four-kernel pipeline, and merges the cutset in memory-bounded batches against a running frontier.
+%     \item We evaluate on MOKP, MOSPP, and MOTSP instances with up to seven objectives against a state-of-the-art MIP baseline~\citep{dachert2024simple} and the state-of-the-art serial DD baseline~\citep{bergman2022network}, and show that our parallel CPU and GPU variants cut enumeration time relative to serial DD by up to $7.83\times$ and $20.88\times$ respectively, with the GPU fastest when frontiers fit in device memory and the CPU more reliable when they do not.
+% \end{itemize}
+We make the following contributions. We identify three sources of parallelism in bidirectional PF enumeration, namely node expansion within a layer, label processing within a node, and frontier products and merges during the coupling phase. We develop a CPU implementation that dynamically distributes node expansion across OpenMP threads and combines cutset frontiers using a lock-free pairwise reduction tree. We develop a GPU implementation that flattens the diagram into offset-indexed arc arrays, expands each layer with a four-kernel pipeline, and merges the cutset in memory-bounded batches against a running frontier. We evaluate the proposed methods on multiobjective variants of knapsack, set packing and traveling salesperson instances. We compare them with a state-of-the-art MIP method~\citep{dachert2024simple} and a state-of-the-art serial DD method~\citep{bergman2022network}. Relative to the serial DD method, the CPU and GPU implementations reduce enumeration time by up to $7.83\times$ and $20.88\times$, respectively. The GPU performs best when the frontiers fit in device memory, while the CPU is more robust when they do not.
 
-Multiobjective discrete optimization (MODO) \cite{ehrgott2005multicriteria,ehrgott2016exact,miettinen1999nonlinear} problems of this kind are common in routing, scheduling, and resource-allocation settings, among others. Problem-specific heuristics \cite{Vianna2014AMG} and evolutionary methods \cite{Deb2002AFA} are widely used to obtain a representative subset of the frontier quickly, but they cannot certify that every trade-off has been found; exact enumeration of the PF remains necessary whenever this certification is required. Decision diagrams (DDs) \cite{bergman2016decision} provide an effective exact framework for discrete problems with a dynamic programming structure. An exact DD compactly represents the feasible set as a layered acyclic graph; PF enumeration can then be performed by propagating nondominated labels through this graph. Recent DD-based methods have shown strong performance on MODO problems with several objectives and tens to hundreds of decision variables \cite{bergman2016multiobjective,bergman2022network}.
+% The remainder of this paper is organized as follows. \Cref{sec:prelim} provides background on MODO and DDs. \Cref{sec:method} describes the parallel enumeration methodology. \Cref{sec:results} presents the computational evaluation. \Cref{sec:related} reviews related work. \Cref{sec:conclusion} concludes the paper.
 
-A DD by itself does not make PF enumeration cheap. Every DD node stores a nondominated set of labels for the partial paths that reach it, and expanding a layer generates new candidate labels, merges them into the destination node's frontier, and discards the ones some other label dominates. This is expensive because dominance filtering compares every candidate against every other candidate at a node. Enumeration also works inward from both ends of the diagram, alternating between expanding forward from the root and backward from the terminal until the two meet at a shared middle layer called the \emph{cutset}, where the root-side and terminal-side frontiers are combined and filtered once more. Existing DD-based MODO solvers perform all of this one node, one comparison at a time.
-
-This paper studies how to parallelize exact DD-based PF enumeration. The key observation is that the expensive work in bidirectional PF enumeration decomposes at multiple granularities. Layer expansion can be distributed over nodes; candidate generation and dominance checks can be distributed over labels; and the final cutset merge can be organized as a parallel reduction over nondominated sets. These forms of parallelism map differently to multi-core CPUs and GPUs. CPUs are effective for node-level work sharing and tree-structured frontier reduction, whereas GPUs can expose finer-grained parallelism by materializing candidates in flat buffers and filtering them with data-parallel kernels.
-
-We make the following contributions:
-\begin{itemize}
-    \item We identify where bidirectional PF enumeration decomposes for parallel execution. Specifically, across nodes within a layer, across labels within a node, and across products and merges in the coupling phase.
-    \item We builde a CPU implementation that dynamically schedules node expansion over OpenMP threads and reduces cutset frontiers with a lock-free pairwise tree merge.
-    \item We develop a GPU implementation that flattens the diagram into offset-indexed arc arrays, expands each layer with a four-kernel pipeline, and merges the cutset in memory-bounded batches against a running frontier.
-    \item We evaluate on MOKP, MOSPP, and MOTSP instances with up to seven objectives against a state-of-the-art MIP baseline \cite{dachert2024simple} and the state-of-the-art serial DD baseline \cite{bergman2022network}, and show that our parallel CPU and GPU variants cut enumeration time relative to serial DD by up to $7.83\times$ and $20.88\times$ respectively, with the GPU fastest when frontiers fit in device memory and the CPU more reliable when they don't.
-\end{itemize}
-
-The remainder of this paper is organized as follows. \Cref{sec:prelim} provides background on MODO and DDs. \Cref{sec:method} describes the parallel enumeration methodology. \Cref{sec:results} presents the computational evaluation. \Cref{sec:related} reviews related work. \Cref{sec:conclusion} concludes the paper.
-
-\section{Preliminaries}
+\section{Background}
 \label{sec:prelim}
 \subsection{Multiobjective Discrete Optimization}
 \label{sec:prelim_modo}
 A MODO problem can be defined as the minimization of an $m$-dimensional objective vector function $\mathbf{f}(\mathbf{x}) = (f_1(\mathbf{x}), f_2(\mathbf{x}), \dots, f_m(\mathbf{x}))^\top$ subject to $\mathbf{x} \in \mathcal{X}$. Here, $\mathbf{x} = (x_1, x_2, \dots, x_n)^\top$ represents a vector of discrete decision variables, and $\mathcal{X} \subseteq \mathbb{Z}^n$ is the bounded, discrete feasible region. We compare different feasible solutions based on the principle of \emph{Pareto dominance}. For any two feasible solutions $\mathbf{x}^1, \mathbf{x}^2 \in \mathcal{X}$, the solution $\mathbf{x}^1$ is said to Pareto dominate $\mathbf{x}^2$, denoted by $\mathbf{f}(\mathbf{x}^1) \prec \mathbf{f}(\mathbf{x}^2)$, if $f_i(\mathbf{x}^1) \le f_i(\mathbf{x}^2)$ for all $i \in \{1, \dots, m\}$, and there exists at least one index $j \in \{1, \dots, m\}$ strictly satisfying $f_j(\mathbf{x}^1) < f_j(\mathbf{x}^2)$.
-An objective vector $\mathbf{y}^\star = \mathbf{f}(\mathbf{x}^\star)$ associated with a feasible solution $\mathbf{x}^\star \in \mathcal{X}$ is defined as a \emph{nondominated point} if there exists no other feasible solution $\mathbf{x} \in \mathcal{X}$ such that $\mathbf{f}(\mathbf{x}) \prec \mathbf{y}^\star$. The collection of all such nondominated points across the entire feasible region constitutes the \emph
-{PF} (or nondominated frontier) of the MODO problem. Mathematically, this frontier is expressed as $\mathcal{Y}_N = \{\mathbf{f}(\mathbf{x}) \mid \mathbf{x} \in \mathcal{X}, \nexists \, \mathbf{x}' \in \mathcal{X} \text{ such that } \mathbf{f}(\mathbf{x}') \prec \mathbf{f}(\mathbf{x})\}$. The fundamental aim in exact multiobjective optimization is to completely enumerate this PF, providing decision-makers with the exact trade-offs among the competing criteria.
+An objective vector $\mathbf{y}^\star = \mathbf{f}(\mathbf{x}^\star)$ associated with a feasible solution $\mathbf{x}^\star \in \mathcal{X}$ is defined as a \emph{nondominated point} if there exists no other feasible solution $\mathbf{x} \in \mathcal{X}$ such that $\mathbf{f}(\mathbf{x}) \prec \mathbf{y}^\star$. The collection of all such nondominated points across the entire feasible region constitutes the PF. Mathematically, this frontier is expressed as $\mathcal{Y}_N = \{\mathbf{f}(\mathbf{x}) \mid \mathbf{x} \in \mathcal{X}, \nexists \, \mathbf{x}' \in \mathcal{X} \text{ such that } \mathbf{f}(\mathbf{x}') \prec \mathbf{f}(\mathbf{x})\}$. The primary goal of exact multiobjective optimization is to enumerate the PF.
+
+
+% \begin{algorithm}[t!]
+% \caption{Bidirectional PF Enumeration and Serial CPU Backend}
+% \label{alg:bidir_pf}
+% \begin{algorithmic}[1]
+% \Require Exact decision diagram $\mathcal{D}$
+
+% \Procedure{FilterDominated}{$\mathcal{Y}$}
+%     \Comment{$\mathcal{O}(|\mathcal{Y}|^2)$}
+%     \State \Return
+%     $\{
+%         \mathbf{y} \in \mathcal{Y}
+%         \mid
+%         \nexists\,\mathbf{y}' \in \mathcal{Y}
+%         \text{ such that }
+%         \mathbf{y}' \prec \mathbf{y}
+%     \}$
+% \EndProcedure
+
+% \Procedure{ExpandLayer$_{\mathrm{CPU}}$}{$\mathcal{Y},j,d$}
+%     \If{$d=\downarrow$}
+%         \For{\textbf{each} arc $a=(u,v)$ with $v\in\mathcal{L}_j$}
+%             \State
+%             $\mathcal{Y}(v)
+%             \gets
+%             \mathcal{Y}(v)
+%             \cup
+%             \bigl(
+%                 \mathcal{Y}(u)
+%                 \oplus
+%                 \{\mathbf{v}(a)\}
+%             \bigr)$
+%             \State
+%             $\mathcal{Y}(v)
+%             \gets
+%             \Call{FilterDominated}{\mathcal{Y}(v)}$
+%         \EndFor
+%     \Else
+%         \For{\textbf{each} arc $a=(u,v)$ with $u\in\mathcal{L}_j$}
+%             \State
+%             $\mathcal{Y}(u)
+%             \gets
+%             \mathcal{Y}(u)
+%             \cup
+%             \bigl(
+%                 \mathcal{Y}(v)
+%                 \oplus
+%                 \{\mathbf{v}(a)\}
+%             \bigr)$
+%             \State
+%             $\mathcal{Y}(u)
+%             \gets
+%             \Call{FilterDominated}{\mathcal{Y}(u)}$
+%         \EndFor
+%     \EndIf
+%     \State \Return $\mathcal{Y}$
+% \EndProcedure
+
+% \Procedure{Couple$_{\mathrm{CPU}}$}
+% {$\mathcal{Y}^{\downarrow},
+%   \mathcal{Y}^{\uparrow},
+%   \mathcal{L}_c$}
+%     \State $\mathcal{Y}_N\gets\emptyset$
+%     \For{\textbf{each} node $u\in\mathcal{L}_c$}
+%         \State
+%         $\mathcal{Y}(u)
+%         \gets
+%         \mathcal{Y}^{\downarrow}(u)
+%         \oplus
+%         \mathcal{Y}^{\uparrow}(u)$
+%         \State
+%         $\mathcal{Y}_N
+%         \gets
+%         \Call{FilterDominated}
+%         {\mathcal{Y}_N\cup\mathcal{Y}(u)}$
+%     \EndFor
+%     \State \Return $\mathcal{Y}_N$
+% \EndProcedure
+
+% \Procedure{BidirectionalPF}{$\mathcal{D},\mathsf{B}$}
+%     \State
+%     $\mathcal{Y}^{\downarrow}(u)\gets\emptyset$ and
+%     $\mathcal{Y}^{\uparrow}(u)\gets\emptyset$
+%     for all $u\in\mathcal{N}$
+%     \State
+%     $\mathcal{Y}^{\downarrow}(\mathbf{r})\gets\{\mathbf{0}\}$,
+%     $\mathcal{Y}^{\uparrow}(\mathbf{t})\gets\{\mathbf{0}\}$
+
+%     \State
+%     $i_{\mathrm{td}}\gets 1$,
+%     $i_{\mathrm{bu}}\gets n+1$
+%     \State
+%     $s_{\mathrm{td}}\gets 0$,
+%     $s_{\mathrm{bu}}\gets 0$
+
+%     \While{$i_{\mathrm{td}}\neq i_{\mathrm{bu}}$}
+%         \If{$s_{\mathrm{td}}\le s_{\mathrm{bu}}$}
+%             \State $i_{\mathrm{td}}\gets i_{\mathrm{td}}+1$
+%             \State
+%             $\mathcal{Y}^{\downarrow}
+%             \gets
+%             \Call{ExpandLayer$_{\mathsf{B}}$}
+%             {\mathcal{Y}^{\downarrow},
+%              i_{\mathrm{td}},
+%              \downarrow}$
+%             \State
+%             $s_{\mathrm{td}}
+%             \gets
+%             \Call{ComputeScore}
+%             {\mathcal{Y}^{\downarrow},i_{\mathrm{td}}}$
+%         \Else
+%             \State $i_{\mathrm{bu}}\gets i_{\mathrm{bu}}-1$
+%             \State
+%             $\mathcal{Y}^{\uparrow}
+%             \gets
+%             \Call{ExpandLayer$_{\mathsf{B}}$}
+%             {\mathcal{Y}^{\uparrow},
+%              i_{\mathrm{bu}},
+%              \uparrow}$
+%             \State
+%             $s_{\mathrm{bu}}
+%             \gets
+%             \lambda\cdot
+%             \Call{ComputeScore}
+%             {\mathcal{Y}^{\uparrow},i_{\mathrm{bu}}}$
+%         \EndIf
+%     \EndWhile
+
+%     \State $c\gets i_{\mathrm{td}}$
+%     \State \Return
+%     \Call{Couple$_{\mathsf{B}}$}
+%     {$\mathcal{Y}^{\downarrow},
+%      \mathcal{Y}^{\uparrow},
+%      \mathcal{L}_c$}
+% \EndProcedure
+
+% \State \Return
+% \Call{BidirectionalPF}{$\mathcal{D},\mathrm{CPU}$}
+% \end{algorithmic}
+% \end{algorithm}
 
 
 \begin{algorithm}[t!]
 \caption{Bidirectional PF Enumeration}
 \label{alg:bidir_pf}
 \begin{algorithmic}[1]
-\Require Exact decision diagram $\mathcal{D} = (\mathcal{N}, \mathcal{A})$ with layers $\mathcal{L}_1, \dots, \mathcal{L}_{n+1}$
-\Procedure{FilterDominated}{$\mathcal{Y}$} \Comment{$\mathcal{O}(|\mathcal{Y}|^2)$}
-    \State \Return $\mathcal{Y} \gets \{ \mathbf{y} \in \mathcal{Y} \mid \nexists \, \mathbf{y}' \in \mathcal{Y} \text{ such that } \mathbf{y}' \prec \mathbf{y} \}$
-\EndProcedure
-\Procedure{ExpandTopDown}{$j, \mathcal{Y}^{\downarrow}$}
-    \For{\textbf{each} node $u \in \mathcal{L}_j$}
-        \For{\textbf{each} arc $a = (u, v)$ originating from $u$}
-            \State $\mathcal{Y}^{\downarrow}(v) \gets \mathcal{Y}^{\downarrow}(v) \cup (\mathcal{Y}^{\downarrow}(u) \oplus \{\mathbf{v}(a)\})$
-            \State $\mathcal{Y}^{\downarrow}(v) \gets$ \Call{FilterDominated}{$\mathcal{Y}^{\downarrow}(v)$}
-        \EndFor
-    \EndFor
-    \State \Return $\mathcal{Y}^{\downarrow}$
-\EndProcedure
-\Procedure{ExpandBottomUp}{$j, \mathcal{Y}^{\uparrow}$}
-    \For{\textbf{each} node $v \in \mathcal{L}_j$}
-        \For{\textbf{each} arc $a = (u, v)$ entering $v$ from $u \in \mathcal{L}_{j-1}$}
-            \State $\mathcal{Y}^{\uparrow}(u) \gets \mathcal{Y}^{\uparrow}(u) \cup (\mathcal{Y}^{\uparrow}(v) \oplus \{\mathbf{v}(a)\})$
-            \State $\mathcal{Y}^{\uparrow}(u) \gets$ \Call{FilterDominated}{$\mathcal{Y}^{\uparrow}(u)$}
-        \EndFor
-    \EndFor
-    \State \Return $\mathcal{Y}^{\uparrow}$
+\Require Exact decision diagram
+$\mathcal{D}=(\mathcal{N},\mathcal{A})$
+with layers $\mathcal{L}_1,\dots,\mathcal{L}_{n+1}$;
+balancing parameter $\lambda$
+
+\Procedure{FilterDominated}{$\mathcal{Y}$}
+    \Comment{$\mathcal{O}(|\mathcal{Y}|^2)$}
+    \State \Return
+    $\{
+        \mathbf{y}\in\mathcal{Y}
+        \mid
+        \nexists\,\mathbf{y}'\in\mathcal{Y}
+        \text{ such that }
+        \mathbf{y}'\prec\mathbf{y}
+    \}$
 \EndProcedure
 
-\State $\mathcal{Y}^{\downarrow}(u) \gets \emptyset$, $\mathcal{Y}^{\uparrow}(u) \gets \emptyset$ for all $u \in \mathcal{N}$
-\State $\mathcal{Y}^{\downarrow}(\mathbf{r}) \gets \{\mathbf{0}\}, \mathcal{Y}^{\uparrow}(\mathbf{t}) \gets \{\mathbf{0}\}$ \Comment{$\mathbf{r}$ is root, $\mathbf{t}$ is terminal}
-\State $i_{\text{td}} \gets 1$, $i_{\text{bu}} \gets n+1$
-\While{$i_{\text{td}} \neq i_{\text{bu}}$}
-    \State Dynamically decide whether to expand top-down or bottom-up
-    \If{expanding top-down}
-        \State \Call{ExpandTopDown}{$i_{\text{td}}, \mathcal{Y}^{\downarrow}$}, $i_{\text{td}} \gets i_{\text{td}} + 1$
+\Procedure{ExpandLayer$_{\mathrm{CPU}}$}{$\mathcal{Y},j,d$}
+    \If{$d=\downarrow$}
+        \For{\textbf{each} arc $a=(u,v)$ with $v\in\mathcal{L}_j$}
+            \State
+            $\mathcal{Y}(v)
+            \gets
+            \mathcal{Y}(v)
+            \cup
+            \left(
+                \mathcal{Y}(u)
+                \oplus
+                \{\mathbf{v}(a)\}
+            \right)$
+            \State
+            $\mathcal{Y}(v)
+            \gets
+            \Call{FilterDominated}{\mathcal{Y}(v)}$
+        \EndFor
     \Else
-        \State \Call{ExpandBottomUp}{$i_{\text{bu}}, \mathcal{Y}^{\uparrow}$}, $i_{\text{bu}} \gets i_{\text{bu}} - 1$
+        \For{\textbf{each} arc $a=(u,v)$ with $u\in\mathcal{L}_j$}
+            \State
+            $\mathcal{Y}(u)
+            \gets
+            \mathcal{Y}(u)
+            \cup
+            \left(
+                \mathcal{Y}(v)
+                \oplus
+                \{\mathbf{v}(a)\}
+            \right)$
+            \State
+            $\mathcal{Y}(u)
+            \gets
+            \Call{FilterDominated}{\mathcal{Y}(u)}$
+        \EndFor
     \EndIf
-\EndWhile
-\State $c \gets i_{\text{td}}, \mathcal{Y}_N \gets \emptyset$
-\For{\textbf{each} node $u \in \mathcal{L}_c$}
-    \State $\mathcal{Y}(u) \gets \mathcal{Y}^{\downarrow}(u) \oplus \mathcal{Y}^{\uparrow}(u)$ \Comment{$\mathcal{O}(|\mathcal{Y}^{\downarrow}(u)||\mathcal{Y}^{\uparrow}(u)|)$}
-\EndFor
-\For{\textbf{each} node $u \in \mathcal{L}_c$}
-    \State $\mathcal{Y}_N \gets$ \Call{FilterDominated}{$\mathcal{Y}_N \cup \mathcal{Y}(u)$}
-\EndFor
-\State \Return $\mathcal{Y}_N$
+    \State \Return $\mathcal{Y}$
+\EndProcedure
+
+\Procedure{Couple$_{\mathrm{CPU}}$}
+{$\mathcal{Y}^{\downarrow},
+ \mathcal{Y}^{\uparrow},
+ \mathcal{L}_c$}
+    \State $\mathcal{Y}_N\gets\emptyset$
+    \For{\textbf{each} node $u\in\mathcal{L}_c$}
+        \State
+        $\mathcal{Y}(u)
+        \gets
+        \mathcal{Y}^{\downarrow}(u)
+        \oplus
+        \mathcal{Y}^{\uparrow}(u)$
+        \State
+        $\mathcal{Y}_N
+        \gets
+        \Call{FilterDominated}
+        {\mathcal{Y}_N\cup\mathcal{Y}(u)}$
+    \EndFor
+    \State \Return $\mathcal{Y}_N$
+\EndProcedure
+
+\Procedure{BidirectionalEnum}{$\mathcal{D},\mathsf{B}$}
+    \State
+    $\mathcal{Y}^{\downarrow}(u)\gets\emptyset$ and
+    $\mathcal{Y}^{\uparrow}(u)\gets\emptyset$
+    for all $u\in\mathcal{N}$
+    \State
+    $\mathcal{Y}^{\downarrow}(\mathbf{r})\gets\{\mathbf{0}\}$,
+    $\mathcal{Y}^{\uparrow}(\mathbf{t})\gets\{\mathbf{0}\}$
+
+    \State
+    $i_{\mathrm{td}}\gets 1$,
+    $i_{\mathrm{bu}}\gets n+1$
+    \State
+    $s_{\mathrm{td}}\gets 0$,
+    $s_{\mathrm{bu}}\gets 0$
+
+    \While{$i_{\mathrm{td}}\neq i_{\mathrm{bu}}$}
+        \If{$s_{\mathrm{td}}\le s_{\mathrm{bu}}$}
+            \State $i_{\mathrm{td}}\gets i_{\mathrm{td}}+1$
+            \State
+            $\mathcal{Y}^{\downarrow}
+            \gets
+            \Call{ExpandLayer$_{\mathsf{B}}$}
+            {\mathcal{Y}^{\downarrow},
+             i_{\mathrm{td}},
+             \downarrow}$
+            \State
+            $s_{\mathrm{td}}
+            \gets
+            \Call{ComputeScore}
+            {\mathcal{Y}^{\downarrow},i_{\mathrm{td}}}$
+        \Else
+            \State $i_{\mathrm{bu}}\gets i_{\mathrm{bu}}-1$
+            \State
+            $\mathcal{Y}^{\uparrow}
+            \gets
+            \Call{ExpandLayer$_{\mathsf{B}}$}
+            {\mathcal{Y}^{\uparrow},
+             i_{\mathrm{bu}},
+             \uparrow}$
+            \State
+            $s_{\mathrm{bu}}
+            \gets
+            \lambda\cdot
+            \Call{ComputeScore}
+            {\mathcal{Y}^{\uparrow},i_{\mathrm{bu}}}$
+        \EndIf
+    \EndWhile
+
+    \State $c\gets i_{\mathrm{td}}$
+    \State \Return
+    \Call{Couple$_{\mathsf{B}}$}
+    {$\mathcal{Y}^{\downarrow},
+     \mathcal{Y}^{\uparrow},
+     \mathcal{L}_c$}
+\EndProcedure
+
+\State \Return
+\Call{BidirectionalEnum}{$\mathcal{D},\mathrm{CPU}$}
 \end{algorithmic}
 \end{algorithm}
-\subsection{Decision Diagrams for Multiobjective Discrete Optimization}
+
+\subsection{Multiobjective Decision Diagrams}
 \label{sec:prelim_dd}
 
-
-A DD is a directed layered acyclic graph $\mathcal{D} = (\mathcal{N}, \mathcal{A})$ defined by a node set $\mathcal{N}$ and an arc set $\mathcal{A}$. The node set is partitioned into $n+1$ strictly sequential layers, $\mathcal{N} = \mathcal{L}_1 \cup \dots \cup \mathcal{L}_{n+1}$, corresponding to the sequence of the $n$ decision variables. The first layer $\mathcal{L}_1$ contains only the \emph{root node} $\mathbf{r}$, and the final layer $\mathcal{L}_{n+1}$ contains only the \emph{terminal node} $\mathbf{t}$.
+A DD is a directed layered acyclic graph $\mathcal{D} = (\mathcal{N}, \mathcal{A})$ defined by a node set $\mathcal{N}$ and an arc set $\mathcal{A}$. The node set is partitioned into $n+1$ layers, $\mathcal{N} = \mathcal{L}_1 \cup \dots \cup \mathcal{L}_{n+1}$, corresponding to the sequence of the $n$ decision variables. The first layer $\mathcal{L}_1$ contains only the \emph{root node} $\mathbf{r}$, and the final layer $\mathcal{L}_{n+1}$ contains only the \emph{terminal node} $\mathbf{t}$.
 
 The arcs in $\mathcal{A}$ are directed from nodes in layer $\mathcal{L}_j$ to nodes in layer $\mathcal{L}_{j+1}$ for $j \in \{1, \dots, n\}$. Every arc $a \in \mathcal{A}$ originating from layer $\mathcal{L}_j$ possesses two key attributes: an \emph{assignment value} $d(a) \in \mathbb{Z}$, which dictates the value assigned to the decision variable $x_j$, and an \emph{objective weight} $\mathbf{v}(a) \in \mathbb{R}^m$, which represents the transition's contribution to the $m$-dimensional objective function. A path $p = (a_1, \dots, a_n)$ from the root $\mathbf{r}$ to the terminal node $\mathbf{t}$ encodes a complete decision vector $\mathbf{x}(p) = (d(a_1), \dots, d(a_n))^\top \in \mathbb{Z}^n$, with an associated objective vector obtained by accumulating the arc weights along the path $\mathbf{v}(p) = \sum_{i=1}^n \mathbf{v}(a_i)$.
 
-
 Let $\mathcal{X}_{\mathcal{D}} = \{ \mathbf{x}(p) \mid p \text{ is an } \mathbf{r}-\mathbf{t} \text{ path in } \mathcal{D} \}$ denote the set of solutions encoded by the diagram. A DD is said to be \emph{exact} for a given problem if it represents the feasible region ($\mathcal{X}_{\mathcal{D}} = \mathcal{X}$) and the path evaluations correctly compute the objective function ($\mathbf{v}(p) = \mathbf{f}(\mathbf{x}(p))$ for all paths). In this case, the image of the encoded solutions in the objective space is $\mathcal{Y}_{\mathcal{D}} = \{ \mathbf{v}(p) \mid p \text{ is an } \mathbf{r}\text{-to-}\mathbf{t} \text{ path} \}$. The nondominated vectors extracted from $\mathcal{Y}_{\mathcal{D}}$ constitute the exact PF $\mathcal{Y}_N$ of the original MODO problem.
 
-During enumeration, each DD node stores a \emph{node frontier}: a nondominated set of objective vectors associated with partial paths through that node. In the root-side direction, $\mathcal{Y}^{\downarrow}(u)$ denotes the node frontier of partial paths from the root $\mathbf{r}$ to node $u$; in the terminal-side direction, $\mathcal{Y}^{\uparrow}(u)$ denotes the node frontier of partial paths from $u$ to the terminal $\mathbf{t}$. Individual objective vectors in a node frontier are called \emph{labels}. Newly generated, unfiltered labels are called \emph{candidate labels}. During cutset merging, a \emph{global frontier} denotes a running nondominated set over complete root-to-terminal labels. We reserve \emph{PF} for the final nondominated set $\mathcal{Y}_N$.
+% During enumeration, each DD node stores a \emph{node frontier}, a nondominated set of objective vectors associated with partial paths through that node. 
+% We write $\mathcal{Y}^{\downarrow}(u)$ for the node frontier of the partial paths from the root $\mathbf{r}$ to node $u$, and $\mathcal{Y}^{\uparrow}(u)$ for the node frontier of the partial paths from $u$ to the terminal $\mathbf{t}$.
+% In the root-side direction, $\mathcal{Y}^{\downarrow}(u)$ denotes the node frontier of partial paths from the root $\mathbf{r}$ to node $u$; in the terminal-side direction, $\mathcal{Y}^{\uparrow}(u)$ denotes the node frontier of partial paths from $u$ to the terminal $\mathbf{t}$. Individual objective vectors in a node frontier are called \emph{labels}. Newly generated, unfiltered labels are called \emph{candidate labels}. During cutset merging, a \emph{global frontier} denotes a running nondominated set over complete root-to-terminal labels. We reserve \emph{PF} for the final nondominated set $\mathcal{Y}_N$.
 
+% To extract this exact PF $\mathcal{Y}_N$ from an exact decision diagram $\mathcal{D}$, we can employ \emph{bidirectional PF enumeration}, which dynamically interleaves root-side and terminal-side layer expansion, as detailed in \Cref{alg:bidir_pf}. This dynamic layer cutset methodology mitigates intermediate node-frontier growth. Initially, a root-side layer pointer $i_{\text{td}}$ is set to layer 1 and a terminal-side pointer $i_{\text{bu}}$ is set to layer $n+1$. At each step, the scheme dynamically decides whether to expand the root-side node frontiers $\mathcal{Y}^{\downarrow}$ to layer $i_{\text{td}}+1$ or the terminal-side node frontiers $\mathcal{Y}^{\uparrow}$ to layer $i_{\text{bu}}-1$. This process continues until the two directions meet at a \emph{cutset} layer $c$ (i.e., $i_{\text{td}} = i_{\text{bu}}$). Finally, for each node $u \in \mathcal{L}_c$, the algorithm computes the pairwise sums of labels in its root-side and terminal-side node frontiers (\Cref{alg:bidir_pf}, line 35). The merging of these combined sets and the repeated application of a dominance filter produce the exact PF $\mathcal{Y}_N$.
 
-To extract this exact PF $\mathcal{Y}_N$ from an exact decision diagram $\mathcal{D}$, we can employ \emph{bidirectional PF enumeration}, which dynamically interleaves root-side and terminal-side layer expansion, as detailed in \Cref{alg:bidir_pf}. This dynamic layer cutset methodology mitigates intermediate node-frontier growth. Initially, a root-side layer pointer $i_{\text{td}}$ is set to layer 1 and a terminal-side pointer $i_{\text{bu}}$ is set to layer $n+1$. At each step, the scheme dynamically decides whether to expand the root-side node frontiers $\mathcal{Y}^{\downarrow}$ to layer $i_{\text{td}}+1$ or the terminal-side node frontiers $\mathcal{Y}^{\uparrow}$ to layer $i_{\text{bu}}-1$. This process continues until the two directions meet at a \emph{cutset} layer $c$ (i.e., $i_{\text{td}} = i_{\text{bu}}$). Finally, for each node $u \in \mathcal{L}_c$, the algorithm computes the pairwise sums of labels in its root-side and terminal-side node frontiers (\Cref{alg:bidir_pf}, line 35). The merging of these combined sets and the repeated application of a dominance filter produce the exact PF $\mathcal{Y}_N$.
+During enumeration, each DD node stores a \emph{node frontier}, a nondominated set of objective vectors associated with the partial paths through that node. We write $\mathcal{Y}^{\downarrow}(u)$ for the node frontier of the partial paths from the root $\mathbf{r}$ to node $u$, and $\mathcal{Y}^{\uparrow}(u)$ for the node frontier of the partial paths from $u$ to the terminal $\mathbf{t}$. An individual objective vector in a node frontier is a \emph{label}, and a newly generated label that has not yet been filtered is a \emph{candidate label}. During cutset merging we maintain a \emph{global frontier}, a running nondominated set over complete root-to-terminal labels, which results in exact PF $\mathcal{Y}_N$, after all cutset node frontier have been merged. 
+
+Bidirectional PF enumeration extracts $\mathcal{Y}_N$ from an exact decision diagram $\mathcal{D}$ by interleaving root-side and terminal-side layer expansion (\Cref{alg:bidir_pf}). Interleaving keeps the intermediate node frontiers smaller than expansion from either end alone. A root-side layer pointer $i_{\text{td}}$ starts at layer 1 and a terminal-side pointer $i_{\text{bu}}$ starts at layer $n+1$. Each step expands one side, advancing the root-side node frontiers $\mathcal{Y}^{\downarrow}$ to layer $i_{\text{td}}+1$ or the terminal-side node frontiers $\mathcal{Y}^{\uparrow}$ to layer $i_{\text{bu}}-1$. The two directions meet at the \emph{cutset} layer $c$, where $i_{\text{td}} = i_{\text{bu}}$. For each node $u \in \mathcal{L}_c$, the algorithm forms the pairwise sums of the labels in its root-side and terminal-side node frontiers (\Cref{alg:bidir_pf}, line 35). Merging these sets into the global frontier and discarding the dominated labels yields $\mathcal{Y}_N$.
 
 \section{Parallel Enumeration of Pareto Frontier using Decision Diagrams}
 \label{sec:method}
@@ -229,66 +441,169 @@ The CPU also parallelizes the cutset products in lines~31--33. Each worker proce
 
 The GPU implementation follows the same enumeration logic as Algorithm~\ref{alg:bidir_pf}, but changes the unit of work. Rather than assigning one worker to own a node frontier, it materializes candidate labels in flat buffers and then applies data-parallel filtering and compaction kernels. The high-level procedure is shown in \Cref{alg:gpu_bidir_pf}: the DD is first flattened, each selected layer expansion invokes the same four-kernel pipeline, and the cutset phase is handled by a separate batched cutset-merge routine.
 
+
 \begin{algorithm}[t!]
-\caption{GPU Bidirectional PF Enumeration}
+\caption{GPU-based Bidirectional PF Enumeration}
 \label{alg:gpu_bidir_pf}
 \begin{algorithmic}[1]
-\Require DD $\mathcal{D}$ with layers $\mathcal{L}_1,\dots,\mathcal{L}_{n+1}$
+\Require Exact decision diagram
+$\mathcal{D}=(\mathcal{N},\mathcal{A})$;
+candidate batch limit $B_{\max}$
 
 \Procedure{FlattenDD}{$\mathcal{D}$}
-\For{$j = 1$ \textbf{to} $n+1$}
-    \State \textit{// Top-down: incoming arcs of $\mathcal{L}_j$}
-    \State \textbf{Initialize} source-node index per arc $b^{\downarrow}$
-    \State \textbf{Initialize} arc weight vector per arc $\mathbf{v}^{\downarrow}$
-    \State \textbf{Initialize} per-node incoming-arc offset $\phi^{a,\downarrow}$
-    \State
-    \State \textit{// Bottom-up: outgoing arcs of $\mathcal{L}_j$}
-    \State \textbf{Initialize} destination-node index per arc $b^{\uparrow}$
-    \State \textbf{Initialize} arc weight vector per arc $\mathbf{v}^{\uparrow}$
-    \State \textbf{Initialize} per-node outgoing-arc offset $\phi^{a,\uparrow}$
-    \State
-    \State \textit{// Scoring heuristic}
-    \State \textbf{Initialize} out-degree per node  $\delta^{\text{out}}$
-    \State \textbf{Initialize} in-degree per node  $\delta^{\text{in}}$
-\EndFor
-\State Transfer all packed arrays to GPU global memory
+    \For{$j=1$ \textbf{to} $n+1$}
+        \State Pack the incoming arcs of $\mathcal{L}_j$ into
+        $(b_j^{\downarrow},
+          \mathbf{v}_j^{\downarrow},
+          \phi_j^{a,\downarrow})$
+        \State Pack the outgoing arcs of $\mathcal{L}_j$ into
+        $(b_j^{\uparrow},
+          \mathbf{v}_j^{\uparrow},
+          \phi_j^{a,\uparrow})$
+        \State Pack the node degrees
+        $\delta_j^{\mathrm{out}}$ and
+        $\delta_j^{\mathrm{in}}$
+    \EndFor
+    \State Transfer flattened arrays to GPU global memory
 \EndProcedure
 
-\Procedure{ExpandLayer}{$\mathcal{Y}, j, d$}
-    \If{$d = \downarrow$}
-        \State $(b,\mathbf{v},\phi^a) \gets (b^{\downarrow},\mathbf{v}^{\downarrow},\phi^{a,\downarrow})$
+\Procedure{ExpandLayer$_{\mathrm{GPU}}$}{$\mathcal{Y},j,d$}
+    \If{$d=\downarrow$}
+        \State
+        $(b,\mathbf{v},\phi^a)
+        \gets
+        (b_j^{\downarrow},
+         \mathbf{v}_j^{\downarrow},
+         \phi_j^{a,\downarrow})$
     \Else
-        \State $(b,\mathbf{v},\phi^a) \gets (b^{\uparrow},\mathbf{v}^{\uparrow},\phi^{a,\uparrow})$
+        \State
+        $(b,\mathbf{v},\phi^a)
+        \gets
+        (b_j^{\uparrow},
+         \mathbf{v}_j^{\uparrow},
+         \phi_j^{a,\uparrow})$
     \EndIf
-    \State $\kappa, \phi^c, \Gamma \gets$ \Call{ComputeArcOffsets}{$\mathcal{Y}, b, \phi^a$}
-    \State $\beta \gets$ \Call{ExpandCandidates}{$\mathcal{Y}, b, \mathbf{v}, \phi^c, \kappa$}
-    \State $\sigma \gets$ \Call{FilterDominated}{$\beta, \Gamma$}
-    \State $\mathcal{Y} \gets$ \Call{CompactSurvivors}{$\beta, \sigma$}
+
+    \State
+    $(\kappa,\phi^c,\Gamma)
+    \gets
+    \Call{ComputeArcOffsets}
+    {\mathcal{Y},b,\phi^a}$
+
+    \State
+    $\beta
+    \gets
+    \Call{ExpandCandidates}
+    {\mathcal{Y},b,\mathbf{v},\phi^c,\kappa}$
+
+    \State
+    $\sigma
+    \gets
+    \Call{SegmentedFilterDominated}
+    {\beta,\Gamma}$
+
+    \State
+    $\mathcal{Y}
+    \gets
+    \Call{CompactSurvivors}
+    {\beta,\sigma,\Gamma}$
+
     \State \Return $\mathcal{Y}$
 \EndProcedure
 
+\Procedure{Couple$_{\mathrm{GPU}}$}
+{$\mathcal{Y}^{\downarrow},
+ \mathcal{Y}^{\uparrow},
+ \mathcal{L}_c$}
+
+    \State
+    $\kappa_v^{\downarrow}
+    \gets
+    |\mathcal{Y}^{\downarrow}(v)|$
+    and
+    $\kappa_v^{\uparrow}
+    \gets
+    |\mathcal{Y}^{\uparrow}(v)|$
+    for all $v\in\mathcal{L}_c$
+
+    \State
+    $\mathcal{V}_c^*
+    \gets
+    \{
+        v\in\mathcal{L}_c
+        \mid
+        \kappa_v^{\downarrow}>0
+        \text{ and }
+        \kappa_v^{\uparrow}>0
+    \}$    
+
+    \State
+    $\operatorname{score}(v)
+    \gets
+    \kappa_v^{\downarrow}
+    +
+    \kappa_v^{\uparrow}$
+    for all $v\in\mathcal{V}_c^*$
+
+    \State
+    Sort $\mathcal{V}_c^*$ in descending order of
+    $\operatorname{score}(v)$
+
+    \State
+    $\mathcal{Y}^{\mathrm{global}}\gets\emptyset$
+
+    \State
+    Partition $\mathcal{V}_c^*$ into batches
+    $\mathcal{B}_1,\mathcal{B}_2,\dots$
+    such that
+    $\sum_{v\in\mathcal{B}_k}
+    \kappa_v^{\downarrow}
+    \kappa_v^{\uparrow}
+    \le B_{\max}$
+
+    \For{\textbf{each} batch $\mathcal{B}$}
+        \State
+        $\beta
+        \gets
+        \Call{MaterializeProducts}
+        {\mathcal{Y}^{\downarrow},
+         \mathcal{Y}^{\uparrow},
+         \mathcal{B}}$
+
+        \If{$\mathcal{Y}^{\mathrm{global}}\neq\emptyset$}
+            \State
+            $\sigma
+            \gets
+            \Call{FilterAgainstFrontier}
+            {\beta,\mathcal{Y}^{\mathrm{global}}}$
+
+            \State
+            $\beta
+            \gets
+            \Call{CompactSurvivors}
+            {\beta,\sigma}$
+        \EndIf
+
+        \State
+        $\beta
+        \gets
+        \Call{SelfPrune}{\beta}$
+
+        \State
+        $\mathcal{Y}^{\mathrm{global}}
+        \gets
+        \Call{MergeFrontiers}
+        {\mathcal{Y}^{\mathrm{global}},\beta}$        
+    \EndFor
+
+    \State \Return $\mathcal{Y}^{\mathrm{global}}$
+\EndProcedure
+
 \State \Call{FlattenDD}{$\mathcal{D}$}
-\State Initialize on GPU: $\mathcal{Y}^{\downarrow}(\mathbf{r}) \gets \{\mathbf{0}\}$, $\mathcal{Y}^{\uparrow}(\mathbf{t}) \gets \{\mathbf{0}\}$
-\State $i_{\text{td}} \gets 1$; \quad $i_{\text{bu}} \gets n+1$
-\State $s_{\text{td}} \gets 0$; \quad $s_{\text{bu}} \gets 0$
-\While{$i_{\text{td}} \neq i_{\text{bu}}$}
-    \If{$s_{\text{td}} \le s_{\text{bu}}$} \Comment{Expand top-down}
-        \State $i_{\text{td}} \gets i_{\text{td}} + 1$
-        \State $\mathcal{Y}^{\downarrow} \gets \textsc{ExpandLayer}(\mathcal{Y}^{\downarrow}, i_{\text{td}}, \downarrow)$
-        \State $s_{\text{td}} \gets \textsc{ComputeScore}(\mathcal{Y}^{\downarrow}, i_{\text{td}})$
-    \Else \Comment{Expand bottom-up}
-        \State $i_{\text{bu}} \gets i_{\text{bu}} - 1$
-        \State $\mathcal{Y}^{\uparrow} \gets \textsc{ExpandLayer}(\mathcal{Y}^{\uparrow}, i_{\text{bu}}, \uparrow)$
-        \State $s_{\text{bu}} \gets 1.5 \times \textsc{ComputeScore}(\mathcal{Y}^{\uparrow}, i_{\text{bu}})$
-    \EndIf
-\EndWhile
-\State $c \gets i_{\text{td}}$ \Comment{Cutset layer}
-\State $\mathcal{Y}_N \gets$ \Call{CutsetMerge}{$\mathcal{Y}^{\downarrow}, \mathcal{Y}^{\uparrow}, \mathcal{L}_c$}
-\State \Return $\mathcal{Y}_N$
+\State \Return
+\Call{BidirectionalEnum}{$\mathcal{D},\mathrm{GPU}$}
 \end{algorithmic}
 \end{algorithm}
-
-
 
 The flattened representation stores, for each layer and traversal direction, the relevant source or destination node index for each arc, the arc weight vector, and a per-node arc-offset array. This layout makes each layer expansion a segmented operation over contiguous arc and candidate arrays. The representation is built once and reused throughout the enumeration.
 
@@ -309,29 +624,6 @@ First, \Cref{alg:compute_arc_offsets} counts how many candidate labels each arc 
 The cutset phase uses a different schedule, shown in \Cref{alg:gpu_cutset_merge}. Active cutset nodes are those with nonempty root-side and terminal-side node frontiers. They are sorted by node-frontier size and processed in product-bounded batches so that the Cartesian product for a batch fits in memory. For each batch, \Cref{alg:materialize_cutset_products} materializes all sums $\mathbf{y}^{\downarrow}+\mathbf{y}^{\uparrow}$ corresponding to lines~31--33 of Algorithm~\ref{alg:bidir_pf}. The batch is then filtered against the current global frontier, self-pruned, and merged into the running global frontier. Thus the GPU does not use the CPU tree reduction in \Cref{alg:cpu_tree_reduction}; it uses a batched running-frontier merge, where batching is both a load-balancing mechanism and a memory-control mechanism.
 
 Batching does not change the set being computed. After each batch is processed, the running frontier is the nondominated union of all cutset products seen so far. Filtering a new batch against this frontier removes points already dominated by earlier batches, and the final mutual merge removes earlier points dominated by the new survivors. The result is therefore the same nondominated union over all active cutset nodes, but evaluated with bounded intermediate memory.
-
-\begin{algorithm}[tbp!]
-\caption{GPU Subroutine: Batched Cutset Merge}
-\label{alg:gpu_cutset_merge}
-\begin{algorithmic}[1]
-\Require Cutset nodes $\mathcal{L}_c$; frontiers $\mathcal{Y}^{\downarrow}(v)$, $\mathcal{Y}^{\uparrow}(v)$ and sizes $\kappa^{\downarrow}_v$, $\kappa^{\uparrow}_v$ for all $v \in \mathcal{L}_c$; candidate batch limit $B_{\max}$
-\State $\mathcal{V}^*_c \gets \{v \in \mathcal{L}_c \mid \kappa^{\downarrow}_v > 0 \text{ and } \kappa^{\uparrow}_v > 0\}$ \Comment{Active nodes}
-\State $\text{score}(v) \gets \kappa^{\downarrow}_v + \kappa^{\uparrow}_v$ for all $v \in \mathcal{V}^*_c$
-\State Sort $\mathcal{V}^*_c$ in descending order of $\text{score}(v)$
-\State $\mathcal{Y}^{\text{global}} \gets \emptyset$ \Comment{Running global frontier in GPU memory}
-\State Partition sorted $\mathcal{V}^*_c$ into batches $\mathcal{B}_1, \mathcal{B}_2, \dots$ s.t.\ $\sum_{v \in \mathcal{B}_k} \kappa^{\downarrow}_v \cdot \kappa^{\uparrow}_v \le B_{\max}$
-\For{each batch $\mathcal{B}$}
-    \State $\beta \gets$ \Call{MaterializeProducts}{$\mathcal{Y}^{\downarrow}, \mathcal{Y}^{\uparrow}, \mathcal{B}$}
-    \If{$\mathcal{Y}^{\text{global}} \neq \emptyset$}
-        \State $\sigma \gets$ \Call{FilterAgainstFrontier}{$\beta, \mathcal{Y}^{\text{global}}$}
-        \State $\beta \gets$ \Call{CompactSurvivors}{$\beta, \sigma$}
-    \EndIf
-    \State $\beta \gets$ \Call{SelfPrune}{$\beta$} \Comment{Local 1D dominance check}
-    \State $\mathcal{Y}^{\text{global}} \gets$ \Call{MergeFrontiers}{$\mathcal{Y}^{\text{global}}, \beta$} \Comment{Mutual pruning and concatenation}
-\EndFor
-\State \Return $\mathcal{Y}^{\text{global}}$
-\end{algorithmic}
-\end{algorithm}
 
 \section{Computational Experiments}
 \label{sec:results}
