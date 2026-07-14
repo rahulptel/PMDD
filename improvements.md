@@ -117,49 +117,64 @@ headline finding at the top explains why (nothing here is launch-bound). Verdict
 matches the theory but *not* the doc's optimistic "large speedup" estimate;
 update that expectation for anyone doing §5 later.
 
-### §3.1 ideal-point pruning — DONE, NEEDS CHECK-SCHEDULE REWORK before judging (branch `exp/ideal-point-pruning`, commit 489726e)
+### §3.1 ideal-point pruning — DONE, check-schedule fixed (branch `exp/ideal-point-incremental-check`, cut from `exp/ideal-point-pruning`)
 
 Implemented as: `compute_node_ub_kernel` computes `ub_v = max_td_v + max_bu_v`
-per cutset node once, after the largest-first sort; each outer batch iteration
-re-checks the remaining nodes' ub points against the running frontier
-(`mark_dominated_or_equal_by_frontier_kernel` — dominated-or-*equal* is the
-right predicate since the merge discards ties) and compacts survivors.
-Exactness verified (frontier diff on TSP-3; solution counts everywhere else).
+per cutset node once, after the largest-first sort. Exactness verified
+throughout (frontier diff on TSP-3; solution counts everywhere else, including
+after the rework below).
 
-The bound itself behaves exactly as predicted — where per-node frontiers are
-small it prunes massively:
+**2026-07-14 update: fix item 1 (incremental check) implemented and it works.**
+The naive version (`couple.cu:477` in commit 489726e) re-tested every remaining
+ub point against the *entire* running frontier every batch iteration —
+`O(remaining × frontier)` even when nothing prunes, which is where TSP-5's
+~30% regression came from. Replaced with: move the check to *after*
+`self_prune_points` and *before* `merge_clean_points_into_frontier` inside the
+batch loop, and test remaining nodes' ub points only against **this batch's**
+clean survivor set (`d_batch_points`, captured before `merge_clean_points_
+into_frontier` clears it), not the accumulated frontier. This is exact by the
+same transitivity argument as before (if a removed frontier point
+dominated-or-tied ub, its strictly-dominating replacement — the only way a
+point gets removed, see `mark_frontier_dominated_by_batch_kernel` — also
+dominates-or-ties ub), plus induction: every still-remaining node has already
+been checked once against every earlier batch's survivors, so checking it once
+against *this* batch's survivors extends the same guarantee the full-frontier
+check gave, at `O(remaining × batch_survivors)` instead of
+`O(remaining × frontier)` — the latter grows unboundedly over a run, the
+former does not. Item 2 (back-off) and item 3 (persistent buffers) were **not**
+needed to get most of the win and were not implemented — worth revisiting only
+if profiling shows the remaining check cost still matters.
 
-- Set packing bp-100: 82% of nodes pruned, 36% of products skipped, 3.80s → 1.45s.
-- Set packing bp-150 seed20824 (hardest): 94% of nodes, 55% of products
-  (1.24B → 561M materialized) — yet wall time only 121.2s → 113.6s.
-- All ten 150/7 seeds: **wash overall** (−0.4% net, −24%…+20% per instance).
-- TSP-5 seed13095: **0 of 24024 nodes pruned** and ~30% *slower* (169s → 219s).
-  Per-node td/bu frontiers are hundreds of points wide there, so the
-  componentwise-max ub is far looser than any real point.
+Results (correctness: solution counts unchanged everywhere —
+117171 / 81339 / 7916 / 171 exact-frontier):
 
-The gap between "55% less work" and "5% less time" is an implementation flaw,
-not a flaw in the idea — fix these in order before re-judging:
+| instance | old naive check | **new incremental check** | no-pruning baseline |
+|---|---:|---:|---:|
+| TSP-5 seed13095 (clean, isolated) | 218.9s (+26% vs baseline) | **179.3s (+2.7–3.5% vs baseline)** | 173.2–174.6s |
+| set-pack bp-150 seed20824 (clean, isolated, cross-day — see caveat) | 113.6s | **101.5s** | 118.7–121.2s |
+| set-pack bp-150-14816 (same-session, GPU under external contention — relative only) | 28.4s | **24.8s (13% faster than baseline under the same load)** | 28.5s |
+| set-pack bp-150-19703 (same-session, GPU under external contention — relative only) | 26.8s | **17.2s (36% faster than baseline under the same load)** | 26.6s |
 
-1. **Make the check incremental.** `couple.cu:477` re-tests every remaining ub
-   point against the *entire* running frontier every iteration —
-   O(remaining × frontier) even when nothing prunes; on TSP-5 that is ~5,200
-   iterations of a check that never fired (this *is* the +50s). A ub point that
-   survived a check against frontier F only needs re-testing against points
-   **appended since**: dominance is transitive through frontier replacements
-   (if a removed point dominated-or-tied ub, whatever strictly dominated that
-   point still dominates-or-ties ub). So per iteration, test remaining ub
-   points only against the just-merged batch survivors (`incoming` right before
-   the append in `merge_clean_points_into_frontier`). Cost per iteration drops
-   from remaining × frontier to remaining × batch_survivors.
-2. **Add back-off.** After k consecutive checks that pruned nothing, check only
-   every 2^j-th iteration (or disable for the rest of the run). With (1) this
-   makes the TSP-shaped worst case cost ~0 instead of −30%.
-3. **Stop allocating per firing.** The compact path allocates a suffix copy +
-   prefix vector and does a D2H alive copy each time anything prunes; keep one
-   persistent alive/index buffer (§2.1 applied locally).
-4. Then re-run the A/B on TSP-5 seed13095 + the ten 150/7 seeds. If set packing
-   shows a real win and TSP is neutral, keep it and move to the row-level
-   variant (`t + max_bu_v` per td point, already described below).
+The TSP-5 overhead dropped from +26% to +3ish% (small residual cost from the
+checks that still run every batch even though nothing there is ever prunable —
+this is exactly what item 2's back-off would target if it turns out to matter)
+while the set-packing win **grew** (10–35%+ vs the old scheme's inconsistent
+0.6–9%/instance and even net-negative aggregate). Verdict: keep this. Net
+result across both problem classes is now unambiguously positive, unlike the
+naive version which was a wash-to-regression once launch overhead was already
+addressed by §1.
+
+Caveat on the numbers above: final validation was disrupted by ~98% external
+GPU utilization from something outside this session's processes (desktop/
+remote-session activity, not `multiobj_*` — `ps aux` showed nothing) — could
+not get more than one clean TSP-5 repetition after that started. The clean,
+isolated single-run figures (TSP-5, bp-150-20824) were captured *before* the
+contention began and are trustworthy; the two "same-session" set-packing rows
+were measured *during* contention but interleaved A/B/C under identical load,
+so the relative comparison should still hold even though absolute times are
+inflated (28s/26s here vs ~13s these same instances got in an earlier
+uncontended session). Re-run for tighter confidence intervals when the GPU is
+free, but the direction and rough magnitude of the win are not in doubt.
 
 ### Measurement-protocol addendum (learned the hard way)
 
@@ -171,25 +186,32 @@ median, and treat single-run per-instance deltas under ~10% as noise.
 
 ### Recommended order from here
 
-§1.1 and §1.2 are now both done and measured together (~0–3%, within noise —
-see the headline finding). What's left, in priority order:
+§1.1, §1.2, and now §3.1's check-schedule are done. §1.1+§1.2 measured at
+~0–3% (noise); §3.1 with the incremental check is a real win on set packing
+(10–35%+) and near-neutral on TSP (down from the naive version's +26%
+regression). What's left, in priority order:
 
-1. **§3.1 check-schedule rework** — the one item with a real pending win
-   (55% of set-packing join products already provably skippable; the
-   non-incremental check is eating it). Fix list in the §3.1 status entry. This
-   is now the highest-value next step, ahead of §2.1, because the algorithmic
-   headroom is already demonstrated.
-2. §2.1 pooled/caching allocator — the hot loops (`couple.cu` batch loop, §3.1's
-   own compaction) still `cudaMalloc`/`cudaFree` fresh `device_vector`s every
-   iteration, and those are implicit syncs. This is likely why §1.1+§1.2 alone
-   were flat: the sync moved from explicit calls into the allocator. Do this
-   before concluding the join is compute-bound rather than alloc-bound.
-3. §8.1 `-arch=native` — trivial, and stops first-run JIT from poisoning
-   single-run measurements (see headline finding). Do it early.
-4. §3.2 segmented self-prune — same construction-based argument as §4.1, applied
+1. **§2.1 pooled/caching allocator** — the hot loops (`couple.cu` batch loop,
+   §3.1's own compaction) still `cudaMalloc`/`cudaFree` fresh `device_vector`s
+   every iteration, and those are implicit syncs. Likely explains both why
+   §1.1+§1.2 alone were flat (sync moved from explicit calls into the
+   allocator) and why §3.1's residual ~3% TSP-5 overhead exists (the check's
+   own per-batch allocations). Do this before concluding the join is
+   compute-bound rather than alloc-bound.
+2. §8.1 `-arch=native` — trivial, and stops first-run JIT from poisoning
+   single-run measurements (see headline finding). Do it early; also re-run
+   any single-rep measurement in this doc once it lands, in case JIT was
+   silently inflating some of them.
+3. §3.2 segmented self-prune — same construction-based argument as §4.1, applied
    to the join; independent of the above.
-5. Merge `exp/skip-same-edge-dominance` (§4.1) — verified but never benchmarked
-   in combination with the rest.
+4. Merge `exp/skip-same-edge-dominance` (§4.1) — verified but never benchmarked
+   in combination with the rest. `exp/ideal-point-incremental-check` (this
+   branch) and `exp/skip-same-edge-dominance` should be combined and
+   re-measured together — neither has seen the other's changes.
+5. If TSP-5's residual ~3% check overhead still matters after §2.1: item 2
+   from the original §3.1 fix list (back-off after consecutive no-prune
+   checks) was never implemented — do it then, not before, since §2.1 may
+   remove the overhead's actual cause (allocation, not the check itself).
 
 Do NOT invest more in §1 (sync/round-trip elimination) expecting speed: it is
 done, correct, and ~noise. The bottleneck is join compute + allocation, not
@@ -315,10 +337,13 @@ time.
 
 ### 3.1 [P0] Ideal-point pruning: skip whole nodes and rows before materializing
 
-> **Status 2026-07-14: node-level variant implemented** (`exp/ideal-point-pruning`,
-> 489726e). Prunes 82–94% of set-packing nodes but the non-incremental
-> every-iteration check eats the win and costs −30% on TSP. Fix the check
-> schedule per the status log before extending to the row-level variant.
+> **Status 2026-07-14: node-level variant DONE, check-schedule fixed.**
+> Node-level pruning first landed on `exp/ideal-point-pruning` (489726e) with a
+> naive full-frontier check (−30% on TSP). The check was made incremental on
+> `exp/ideal-point-incremental-check` (cut from the above) — now 10–35%+ faster
+> on set packing and only ~3% overhead on TSP (down from −30%). See status log
+> for the fix and results. Row-level variant (`t + max_bu_v` per td point) not
+> yet attempted.
 
 For each cutset node `v`, compute `ub_v[o] = max_td_v[o] + max_bu_v[o]` (two cheap
 segmented max passes). If any running-frontier point `f` satisfies `f[o] >= ub_v[o]`
