@@ -14,9 +14,139 @@ layer-selection *heuristic* (not correctness) is flagged explicitly.
 
 ---
 
+## Status log — updated 2026-07-14
+
+Three items have been attempted, on two branches cut from `aaai` (each in its own
+worktree). The branches are **disjoint and have not been benchmarked together**.
+All numbers are from the local RTX A2000 (6 GB, shared with the desktop's Xorg) —
+read the measurement-protocol addendum below before trusting any delta under ~10%.
+
+### Build prerequisites (any new branch cut from `aaai`/`main`)
+
+- `.gitignore` line 4 (`multiobj_*`, meant for the built binaries) also matches
+  `src/pmdd/enum/multiobj_enum.{hpp,cpp}`, which is why commit af9c827
+  ("Restructure repo") silently dropped them — **HEAD does not compile**. Both
+  experiment branches carry a restore commit; cherry-pick one of them (or anchor
+  the pattern to `/multiobj_*`, restore the files from `af9c827~1:src/enum/`, and
+  `git add -f`) before starting anything new.
+- Local build needs a Boost prefix and an nvcc-compatible host compiler
+  (system gcc 13 is too new for CUDA 12.0). The makefile hardcodes `CUDAFLAGS`,
+  so override it wholesale:
+  `make -C src/pmdd NUM_OBJS=<N> ENABLE_CUDA=1 ENABLE_OPENMP=1 BOOSTDIR=<prefix>
+  CUDAFLAGS="-std=c++14 -O3 -DUSE_CUDA -DNOBJS=<N> -I<prefix>/include -ccbin g++-11"`.
+
+### §4.1 skip same-arc pairs — DONE, keep (branch `exp/skip-same-edge-dominance`, commit 3725c44)
+
+Implemented exactly as described: `materialize_edge_candidates_kernel` emits a
+per-candidate arc id; `mark_local_dominated_kernel` skips same-arc comparisons
+(which also subsumes the self-comparison check). Exact frontier equality verified
+against the CPU reference.
+
+- TSP-5 top-down GPU (seed11093): 19.47s → 18.53s (~5%).
+- TSP-5 coupled GPU (seed13095): 163.7s → 160.4s (~2% — `layer_coupling=9`;
+  the wide middle layers bypass this kernel and land in the join instead).
+- Set packing 150/30/7, 10 seeds, coupled GPU: net +0.8%, per-instance −17%…+8%
+  (single runs — this straddle is noise-level). Verdict: real for MDD/TSP where
+  a destination sees few arcs each carrying a large frontier; neutral for the
+  set-packing BDD (many arcs × small per-arc frontiers, so the skip saves little
+  while the arc-id loads still cost).
+
+### §1.1 kill per-kernel sync — DONE BUT INCOMPLETE (branch `exp/ideal-point-pruning`, commit dc579ba)
+
+`sync_kernel()` now does only the async `cudaGetLastError()` check; the old
+behavior is behind `PMDD_CUDA_SYNC_DEBUG`. The redundant explicit sync before
+`thrust::reduce` in `compute_expansion_score` is also gone.
+
+Measured: TSP-3 coupled (tiny, launch-bound) 2.74s → 0.14s — the mechanism works
+where the doc said it would. But on large instances there was **no gain**
+(TSP-5 seed13095 coupled: 163.7s cross-day baseline vs 169–174s over two runs;
+150/7 set-packing total 260.2s → 253.2s ≈ noise). Two causes, both foreseeable:
+
+1. **§1.2 was skipped.** Every layer/batch iteration still blocks the host on
+   single-element `device_vector` reads/writes and `thrust::reduce`-to-host
+   calls (see the §1.2 list — all of those sites are still live). Removing the
+   explicit sync just relocates the wait into the next blocking read. §1.1 and
+   §1.2 are one unit; measuring them separately measures nothing.
+2. **The BDD top-down path is still fully synced by its timers.**
+   `enumerate_bdd_topdown` (topdown.cu) wraps every kernel in a
+   `ScopedCudaEventTimer` whose `finish_and_add()` calls `cudaEventSynchronize`
+   — a per-kernel sync by another name, active whenever stats are collected
+   (main.cpp always passes stats). Convert these to per-phase timers (or make
+   them opt-in) before expecting §1.1 to show up on BDD method=1 runs.
+
+### §3.1 ideal-point pruning — DONE, NEEDS CHECK-SCHEDULE REWORK before judging (branch `exp/ideal-point-pruning`, commit 489726e)
+
+Implemented as: `compute_node_ub_kernel` computes `ub_v = max_td_v + max_bu_v`
+per cutset node once, after the largest-first sort; each outer batch iteration
+re-checks the remaining nodes' ub points against the running frontier
+(`mark_dominated_or_equal_by_frontier_kernel` — dominated-or-*equal* is the
+right predicate since the merge discards ties) and compacts survivors.
+Exactness verified (frontier diff on TSP-3; solution counts everywhere else).
+
+The bound itself behaves exactly as predicted — where per-node frontiers are
+small it prunes massively:
+
+- Set packing bp-100: 82% of nodes pruned, 36% of products skipped, 3.80s → 1.45s.
+- Set packing bp-150 seed20824 (hardest): 94% of nodes, 55% of products
+  (1.24B → 561M materialized) — yet wall time only 121.2s → 113.6s.
+- All ten 150/7 seeds: **wash overall** (−0.4% net, −24%…+20% per instance).
+- TSP-5 seed13095: **0 of 24024 nodes pruned** and ~30% *slower* (169s → 219s).
+  Per-node td/bu frontiers are hundreds of points wide there, so the
+  componentwise-max ub is far looser than any real point.
+
+The gap between "55% less work" and "5% less time" is an implementation flaw,
+not a flaw in the idea — fix these in order before re-judging:
+
+1. **Make the check incremental.** `couple.cu:477` re-tests every remaining ub
+   point against the *entire* running frontier every iteration —
+   O(remaining × frontier) even when nothing prunes; on TSP-5 that is ~5,200
+   iterations of a check that never fired (this *is* the +50s). A ub point that
+   survived a check against frontier F only needs re-testing against points
+   **appended since**: dominance is transitive through frontier replacements
+   (if a removed point dominated-or-tied ub, whatever strictly dominated that
+   point still dominates-or-ties ub). So per iteration, test remaining ub
+   points only against the just-merged batch survivors (`incoming` right before
+   the append in `merge_clean_points_into_frontier`). Cost per iteration drops
+   from remaining × frontier to remaining × batch_survivors.
+2. **Add back-off.** After k consecutive checks that pruned nothing, check only
+   every 2^j-th iteration (or disable for the rest of the run). With (1) this
+   makes the TSP-shaped worst case cost ~0 instead of −30%.
+3. **Stop allocating per firing.** The compact path allocates a suffix copy +
+   prefix vector and does a D2H alive copy each time anything prunes; keep one
+   persistent alive/index buffer (§2.1 applied locally).
+4. Then re-run the A/B on TSP-5 seed13095 + the ten 150/7 seeds. If set packing
+   shows a real win and TSP is neutral, keep it and move to the row-level
+   variant (`t + max_bu_v` per td point, already described below).
+
+### Measurement-protocol addendum (learned the hard way)
+
+The comparisons above mixed baselines measured on different days. On this
+machine (GPU also drives the display) cross-day drift was ~±5% — larger than
+several effects being measured. For every future A/B: re-measure the baseline
+in the same session, interleave configs (A,B,A,B), ≥3 reps each, report the
+median, and treat single-run per-instance deltas under ~10% as noise.
+
+### Recommended order from here
+
+1. §1.2 (device-side final-offset scans + one folded readback), then re-measure
+   §1.1+§1.2 *as one unit* on TSP-5 coupled and 2–3 of the 150/7 seeds.
+2. §2.1 pooled/caching allocator — also removes the hidden per-thrust-call temp
+   allocations, which are themselves synchronizing.
+3. Fix §3.1's check schedule (list above) and re-judge it.
+4. §3.2 segmented self-prune — same construction-based argument as §4.1, applied
+   to the join; independent of the above.
+5. Merge `exp/skip-same-edge-dominance` (§4.1) — verified but never benchmarked
+   in combination with the rest.
+
+---
+
 ## 1. Kill per-kernel synchronization and 4-byte device round-trips
 
 ### 1.1 [P0] `sync_kernel` calls `cudaDeviceSynchronize()` after every launch
+
+> **Status 2026-07-14: implemented** (`exp/ideal-point-pruning`, dc579ba) but
+> ineffective alone on large instances — §1.2's blocking reads and the BDD
+> top-down path's per-kernel `ScopedCudaEventTimer` syncs remain. See status log.
 
 `enum_types.cuh:93` — every kernel in the pipeline is followed by
 `cudaGetLastError()` + `cudaDeviceSynchronize()`. A single layer expansion issues
@@ -122,6 +252,11 @@ time.
 
 ### 3.1 [P0] Ideal-point pruning: skip whole nodes and rows before materializing
 
+> **Status 2026-07-14: node-level variant implemented** (`exp/ideal-point-pruning`,
+> 489726e). Prunes 82–94% of set-packing nodes but the non-incremental
+> every-iteration check eats the win and costs −30% on TSP. Fix the check
+> schedule per the status log before extending to the row-level variant.
+
 For each cutset node `v`, compute `ub_v[o] = max_td_v[o] + max_bu_v[o]` (two cheap
 segmented max passes). If any running-frontier point `f` satisfies `f[o] >= ub_v[o]`
 for all `o`, then *every* product of `v` is dominated-or-equal — skip the node entirely
@@ -190,6 +325,10 @@ Used every expansion step on both sweeps (`bottomup.cu:144`, and its twin
 `mark_dominated_by_dst_dynamic_1d_kernel` in `topdown.cu:163`).
 
 ### 4.1 [P1] Skip same-edge pairs
+
+> **Status 2026-07-14: implemented and verified** (`exp/skip-same-edge-dominance`,
+> 3725c44). ~5% on TSP top-down, ~2% on TSP coupled, wash on set packing.
+> Not yet merged with the `exp/ideal-point-pruning` work. See status log.
 
 Candidates arriving over the same arc are a translated copy of the source node's
 Pareto set — mutually nondominated by construction (and duplicate-free, since the
