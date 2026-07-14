@@ -541,7 +541,8 @@ int compute_expansion_score(const thrust::device_vector<int> &offsets,
     compute_layer_score_kernel<<<ceil_div(num_nodes, kThreadsPerBlock), kThreadsPerBlock>>>(
         thrust::raw_pointer_cast(offsets.data()), thrust::raw_pointer_cast(arc_counts.data()),
         thrust::raw_pointer_cast(tmp.data()), num_nodes);
-    cudaDeviceSynchronize();
+    // thrust::reduce already syncs to return its host-side result; the explicit
+    // cudaDeviceSynchronize() that used to precede it was redundant.
     return thrust::reduce(tmp.begin(), tmp.end(), 0);
 }
 

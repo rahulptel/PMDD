@@ -90,10 +90,25 @@ inline bool cuda_ok(cudaError_t err, const char *where, std::string *reason) {
     return set_reason(reason, msg);
 }
 
+// improvements.md 1.1: cudaGetLastError() is a cheap, async check for launch-time
+// errors (bad grid/block config, etc.) -- it never blocks the host. The
+// cudaDeviceSynchronize() that used to follow every single kernel launch does
+// block, and with ~6-10 kernels per layer/batch that adds up to launch+sync
+// latency dominating actual compute on small/medium frontiers. Kernels run on
+// the default stream, so launch order alone still guarantees a later kernel
+// sees an earlier kernel's output; the host only needs an actual sync at the
+// points where it reads a device value back (thrust::reduce, a
+// device_vector element access, or a host_vector copy from a device_vector
+// all already force that sync themselves). Define PMDD_CUDA_SYNC_DEBUG to get
+// the old fail-fast-at-the-offending-kernel behavior back for debugging.
 inline bool sync_kernel(const char *where, std::string *reason) {
     if (!cuda_ok(cudaGetLastError(), where, reason))
         return false;
+#ifdef PMDD_CUDA_SYNC_DEBUG
     return cuda_ok(cudaDeviceSynchronize(), where, reason);
+#else
+    return true;
+#endif
 }
 
 inline bool capture_gpu_memory_used(std::string *reason, long long *used_bytes_out) {
