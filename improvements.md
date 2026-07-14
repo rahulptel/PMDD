@@ -16,27 +16,75 @@ layer-selection *heuristic* (not correctness) is flagged explicitly.
 
 ## Status log — updated 2026-07-14
 
-Four items have been attempted, on two branches cut from `aaai` (each in its own
-worktree). The branches are **disjoint and have not been benchmarked together**.
-All numbers are from the local RTX A2000 (6 GB, shared with the desktop's Xorg) —
-read the measurement-protocol addendum below before trusting any delta under ~10%.
+Four techniques have been attempted, across three branches cut from `aaai`
+(`exp/skip-same-edge-dominance`, `exp/ideal-point-pruning`, and
+`exp/ideal-point-incremental-check` — the latter cut from the second and
+containing everything from it). **Only the last branch has all of §1.1, §1.2,
+and the fixed §3.1 together; §4.1 is still unmerged and untested in
+combination with the rest.** All numbers are from the local RTX A2000 (6 GB,
+shared with the desktop's Xorg, and at times with other GPU load outside this
+session's control) — read the measurement-protocol addendum below before
+trusting any delta under ~10%.
 
-**Headline finding (2026-07-14 re-measure):** §1.1+§1.2 measured together, with a
-clean same-session interleaved A/B (§3.1 reverted so it cannot contaminate), give
-only **~0–3% and mostly within noise** — TSP-3 +2.6%, set-pack bp-100 +1.7%,
-bp-150 −0.3%/+3.1%, TSP-5 seed13095 +0.8%. Not the "large speedup on
-layer-dominated instances" §1 predicts. Root cause: none of these instances is
-launch/sync-bound at the tested scale. Even the 0.10s TSP-3 spends its time in
-dominance/join compute, not in the ~10 µs/launch overhead, because layer counts
-(10–150) are small and per-node frontiers are large — kernel execution dominates
-launch latency everywhere. **Corollary: killing the syncs does not unlock §3.1** —
-that was the hypothesis and the answer is no; §3.1's own check-schedule (below) is
-the lever, not sync overhead. §1.1+§1.2 are correct, free, and worth keeping as a
-~1–3% cleanup, but they are not an enabler. The earlier "§1.1 alone: TSP-3
-2.74s → 0.14s" figure was a **cold-JIT artifact** (no `-arch` in the build ⇒ the
-first run of a freshly-built binary JIT-compiles PTX; the driver caches it after,
-so only run #1 pays it). Do §8.1 (`-arch=native`) so first-run numbers stop lying,
-and never trust a single un-warmed run.
+**Headline findings, in the order a fresh reader should update their mental model:**
+
+1. **§1.1+§1.2 (kill per-kernel sync + single-element `device_vector` round
+   trips): done, correct, but only ~0–3% — not the "large speedup" §1
+   predicted.** Same-session interleaved A/B: TSP-3 +2.6%, set-pack bp-100
+   +1.7%, bp-150 −0.3%/+3.1%, TSP-5 seed13095 +0.8%. Root cause: nothing
+   tested is actually launch/sync-bound at this scale — even the 0.10s TSP-3
+   run spends its time in dominance/join compute, not the ~10 µs/launch
+   overhead, because layer counts (10–150) are small and per-node frontiers
+   are large. **Killing the syncs did not unlock §3.1** — that was the
+   original hypothesis and it's false; §3.1's own check-schedule was the
+   actual lever (next point). Keep §1.1+§1.2 as free cleanup; don't expect
+   more from them.
+
+2. **§3.1 (ideal-point pruning in the join): the first version was a trap,
+   the fixed version is a real win — gated entirely on whether the join is
+   the bottleneck.** The bound itself (`ub_v = max_td_v + max_bu_v`, skip a
+   whole cutset node once the running frontier dominates-or-ties it) is exact
+   and was never in question. The *first implementation* re-checked every
+   remaining node against the entire running frontier on every batch
+   iteration — `O(remaining × frontier)`, unbounded — and that cost TSP-5 a
+   26% regression for zero benefit (0/24024 nodes ever prunable there). Making
+   the check incremental (test only against each batch's own newly-added
+   survivors; exact by a transitivity + induction argument, see the §3.1
+   entry) fixed this: TSP-5's overhead shrank from +26% to +3%, and set
+   packing's win *grew* to 10–35%+ (up from an inconsistent, sometimes
+   net-negative 0.6–9%). **The remaining question is not "does the check
+   work" (it does) but "does this instance's join dominate wall time"** — see
+   the next point.
+
+3. **Tested across three problem classes sharing the same
+   `couple_cutsets_cuda` join** (MDD/TSP, BDD/set-packing, BDD/knapsack —
+   `coupled_bdd_cuda_enumerate` calls the identical function): set packing
+   wins big, TSP-5 is now neutral-to-slightly-positive, and MOKP knapsack
+   (50 vars, 6 objs) is a **flat wash** — its join (~400M theoretical
+   products) is small relative to the two-sided BDD layer-expansion sweeps
+   that dominate its ~12s runtime, and none of these sweeps are touched by
+   this fix. The payoff is not "which problem type" but "how big is the join
+   relative to everything else in the run" — untested whether larger MOKP
+   instances (100+ vars, more objectives) cross that threshold. This is the
+   single most promising open question — see "Next promising directions."
+
+4. **§4.1 (skip same-arc dominance comparisons in layer expansion): real but
+   modest, MDD-specific, and orthogonal to §1/§3.** ~5% on TSP top-down, ~2%
+   on TSP coupled (`layer_coupling` sends most work to the join, which this
+   item doesn't touch), a wash on set-packing's BDD (many small arcs vs TSP's
+   few large ones — the per-comparison arc-id load costs about as much as the
+   skip saves). Verified and committed but living on its own branch, never
+   measured together with §1.1/§1.2/§3.1.
+
+5. **Two single-run measurements in earlier revisions of this log turned out
+   to be noise and were corrected after re-measurement** — a "TSP-3
+   2.74s → 0.14s" figure from §1.1 alone was a cold-JIT artifact (no `-arch`
+   in the build: the first run of a fresh binary JIT-compiles PTX, the driver
+   caches it after, so only run #1 pays it — do §8.1 to stop this), and a
+   "+14.5%" figure for §3.1 on knapsack flattened to ~0% under a same-session
+   interleaved re-measurement. **Treat every single-run number as provisional
+   until interleaved-and-repeated; several already in this doc were wrong the
+   first time.**
 
 ### Build prerequisites (any new branch cut from `aaai`/`main`)
 
@@ -207,38 +255,66 @@ several effects being measured. For every future A/B: re-measure the baseline
 in the same session, interleave configs (A,B,A,B), ≥3 reps each, report the
 median, and treat single-run per-instance deltas under ~10% as noise.
 
-### Recommended order from here
+### Next promising directions, in priority order
 
-§1.1, §1.2, and now §3.1's check-schedule are done. §1.1+§1.2 measured at
-~0–3% (noise); §3.1 with the incremental check is a real win on set packing
-(10–35%+) and near-neutral on TSP (down from the naive version's +26%
-regression). What's left, in priority order:
+Done so far (see headline findings for verdicts): §1.1, §1.2, §3.1's
+node-level check with the incremental schedule, §4.1 (unmerged). Ranked by
+expected value given everything measured to date:
 
-1. **§2.1 pooled/caching allocator** — the hot loops (`couple.cu` batch loop,
-   §3.1's own compaction) still `cudaMalloc`/`cudaFree` fresh `device_vector`s
-   every iteration, and those are implicit syncs. Likely explains both why
-   §1.1+§1.2 alone were flat (sync moved from explicit calls into the
-   allocator) and why §3.1's residual ~3% TSP-5 overhead exists (the check's
-   own per-batch allocations). Do this before concluding the join is
-   compute-bound rather than alloc-bound.
-2. §8.1 `-arch=native` — trivial, and stops first-run JIT from poisoning
-   single-run measurements (see headline finding). Do it early; also re-run
-   any single-rep measurement in this doc once it lands, in case JIT was
-   silently inflating some of them.
-3. §3.2 segmented self-prune — same construction-based argument as §4.1, applied
-   to the join; independent of the above.
-4. Merge `exp/skip-same-edge-dominance` (§4.1) — verified but never benchmarked
-   in combination with the rest. `exp/ideal-point-incremental-check` (this
-   branch) and `exp/skip-same-edge-dominance` should be combined and
-   re-measured together — neither has seen the other's changes.
-5. If TSP-5's residual ~3% check overhead still matters after §2.1: item 2
-   from the original §3.1 fix list (back-off after consecutive no-prune
-   checks) was never implemented — do it then, not before, since §2.1 may
-   remove the overhead's actual cause (allocation, not the check itself).
+1. **[Highest — do this first] Find out whether larger MOKP knapsack
+   instances make the join dominate, the way it does for set packing.**
+   The 50-var/6-obj instance was neutral only because its join (~400M
+   products) is small relative to the layer-expansion sweeps. Try
+   `data/6/knapsack/knapsack-100-6-1000-*.dat` or `data/7/knapsack/*` (more
+   objectives) — bigger instances/more objectives should grow the cutset
+   width and thus `work_join_products_total` faster than they grow the
+   sweeps. If a scale exists where §3.1 clearly wins on knapsack too, that
+   both validates the "join size, not problem type" theory in point 3 above
+   and gives a second real win alongside set packing. If it *never* crosses
+   over even at the largest available instances, that's useful negative
+   evidence that knapsack's BDD structure inherently keeps joins small
+   relative to sweep cost, and effort should redirect to speeding up the
+   sweeps themselves (§4.1, §1.2's still-undone `topdown.cu` sites) for that
+   problem class instead.
+2. **§2.1 pooled/caching allocator.** The hot loops (`couple.cu` batch loop,
+   §3.1's own per-batch check) still `cudaMalloc`/`cudaFree` fresh
+   `device_vector`s every iteration, and those are implicit syncs. This
+   plausibly explains two open puzzles at once: why §1.1+§1.2 alone were flat
+   (the sync cost moved from explicit calls into the allocator, not
+   eliminated) and why §3.1's TSP-5 residual is ~3% rather than ~0% (its
+   check still allocates every batch even on the no-prune-ever path). Do this
+   before concluding any workload here is compute-bound rather than
+   alloc-bound — right now that's an open question, not a settled one.
+3. **Merge `exp/skip-same-edge-dominance` (§4.1) into this branch and
+   re-measure together.** Verified independently but never combined with
+   §1.1/§1.2/§3.1 — they touch disjoint kernels (layer expansion vs. the
+   join) so should compose cleanly, but "should" isn't "measured." This also
+   matters more once direction 1 or 2 lands, since §4.1's ~5% top-down win
+   and §3.1's join win are additive only if the join and layer-expansion
+   phases are both still contributing meaningfully to wall time.
+4. **§8.1 `-arch=native`.** Trivial, and stops first-run JIT from poisoning
+   single-run measurements (see finding 5 above — this already produced one
+   wrong number in this doc). Cheap enough to do alongside any of the above;
+   re-run any surviving single-rep number in this doc once it lands.
+5. **§3.2 segmented self-prune** — same construction-based argument as §4.1
+   (same-row/same-column products are mutually nondominated by construction),
+   applied to the join's `self_prune_points` instead of layer expansion.
+   Independent of the above; worth it once the join is confirmed to still be
+   a meaningful fraction of wall time on some target instance (set packing,
+   qualifies now).
+6. **If TSP-5's residual ~3% check overhead still matters after §2.1**: the
+   back-off idea from the original §3.1 fix list (skip the check for a while
+   after several consecutive no-prune batches) was never implemented. Do it
+   only after §2.1, since §2.1 may remove the overhead's actual cause
+   (allocation) rather than the check itself needing throttling.
+7. **§3.1 row-level variant** (`t + max_bu_v` per td point, one level below
+   the node-level skip already done) — natural extension once the node-level
+   version's overhead is fully understood (post §2.1/§3.2), not before.
 
 Do NOT invest more in §1 (sync/round-trip elimination) expecting speed: it is
-done, correct, and ~noise. The bottleneck is join compute + allocation, not
-launch/sync latency, on every instance tested.
+done, correct, and ~noise on every instance tested. The bottleneck going
+forward is join/sweep compute and allocation overhead, not launch/sync
+latency.
 
 ---
 
