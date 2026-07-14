@@ -51,20 +51,54 @@ rm.patel@mail.utoronto.ca, elias.khalil@utoronto.ca
 \maketitle
 
 \begin{abstract}
-Decision diagrams (DDs) can enumerate the exact Pareto frontier (PF) for multiobjective discrete optimization problems that admit a dynamic programming formulation.
-The Pareto dominance filtering at each node of the DD has a cost that grows quadratically in the size of the intermediate labels. Existing algorithms perform this filtering serially, making it the key bottleneck.
-We parallelize dominance filtering along with layer expansion and the coupling and merging of node frontiers, developing implementations
-tailored to both CPU and GPU.
+Decision diagrams (DDs) can efficiently enumerate the exact Pareto frontier (PF) for multiobjective discrete optimization problems that admit a dynamic programming formulation.
+The filtering of dominated labels at each node of the DD is a key step during enumeration. Its computational complexity grows quadratically with the cardinality of the intermediate label sets.
+Furthermore, the filtering is performed serially by the existing algorithms, making it the primary bottleneck.
+%The Pareto dominance filtering at each node of the DD has a cost that grows quadratically in the size of the intermediate labels. 
+% Existing algorithms perform the filtering serially, leaving significant room for parallelization.
+In this work, we propose a parallelization scheme for DD-based PF enumeration to address this challenge.
+In particular, we propose \textsc{Pmdd} (Parallel Multiobjective Decision Diagrams), which not only parallelizes the dominance filtering but also the expansion, coupling and merging of label sets, tailored to both CPU and GPU.
 We evaluate our methods on benchmark instances of the multiobjective knapsack, set packing, and traveling salesperson problems, comparing against state-of-the-art MIP and serial DD approaches.
 We demonstrate that DD-based serial enumeration outperforms the MIP baseline in most cases.
-Furthermore, our parallel enumeration variants achieve speedups of up to $7.83\times$ while GPU variants reach up to $20.88\times$ relative to serial enumeration, when intermediate frontiers fit in GPU memory.
+Furthermore, our CPU parallel variants achieve speedups of up to $7.83\times$ while GPU variants reach up to $20.88\times$ relative to serial enumeration, when intermediate frontiers fit in GPU memory.
 The code is available at \url{https://anonymous.4open.science/r/DD-C683/}.
 \end{abstract}
 
 \section{Introduction}
 \label{sec:intro}
 
-Many discrete optimization problems that arise in finance, healthcare, routing, to name a few, are inherently multiobjective. In vehicle routing, for example, a dispatcher might need to balance the routing cost and service quality \citep{kovacs2015multi}. As these goals conflict, no single plan is best in terms of cost and service quality at once. To compare different plans we use the principle of \emph{Pareto dominance}, where one solution dominates another if it matches it on every objective and improves on at least one. The goal of exact multiobjective optimization~\citep{ehrgott2005multicriteria,ehrgott2016exact,miettinen1999nonlinear} is to enumerate every nondominated solution, since each one represents a distinct trade-off a decision-maker might reasonably prefer over the rest. The set of all nondominated solutions is known as the \emph{Pareto frontier} (PF). 
+Many discrete optimization problems that arise in sustainability~\citep{flecker2022reducing}, finance~\citep{bonami2009exact}, healthcare~\citep{ehrgott2010mathematical}, routing~\citep{kovacs2015multi}, to name a few, are inherently multiobjective. In vehicle routing, for example, a dispatcher might need to balance the routing cost and service quality. As these goals conflict, no single plan is best in terms of cost and service quality at once. To compare different plans we use the principle of \emph{Pareto dominance}, where one solution dominates another if it matches it on every objective and improves on at least one. The goal of exact multiobjective optimization~\citep{ehrgott2005multicriteria,ehrgott2016exact,miettinen1999nonlinear} is to enumerate all nondominated solutions, i.e., the \emph{Pareto frontier} (PF), since each one represents a distinct trade-off a decision-maker might prefer over the rest. 
+
+We focus on multiobjective discrete optimization problems with linear objectives
+and constraints.
+Exact methods for solving these problems are conventionally built on top of an integer linear programming (ILP) solver and fall into two families~\citep{halffmann2022exact}. \emph{Decision-space} methods search the space of feasible assignments, extending single-objective branch-and-bound with dominance-based pruning: a node is discarded only when its bound set is dominated by the incumbent frontier. The success of these methods depend heavily on the quality of the bound sets. A poor quality bound set might lead to more branching and make the search. \emph{Objective-space} methods instead search the image of the feasible set. They repeatedly solve scalarized single-objective ILPs restricted to a region of the objective space, remove the region dominated by each new nondominated point, and recurse on what remains. Objective-space methods treat the ILP solver as a black box and call it once per region, so the number of \emph{independent} NP-hard solves grows with the size of the frontier and, sharply, with the number of objectives. 
+% Both families are also vulnerable to symmetry: equivalent partial assignments appear as distinct subproblems, and branch-and-bound re-explores each of them unless symmetry is broken explicitly.
+
+Decision diagrams (DDs)~\citep{bergman2016decision} offer an alternative to address these problems. A DD is a layered acyclic graph that compactly represents the feasible set of a problem admitting a dynamic programming (DP) formulation: layers correspond to decision variables, nodes to DP states, and arcs to variable assignments, so that solutions correspond one-to-one with root-to-terminal paths. Because partial assignments that reach the same DP state are merged into a single node, symmetric and equivalent subproblems are collapsed rather than re-explored, and the graph itself provides a discrete relaxation whose strength can be controlled through width. DDs have proven effective for single-objective discrete optimization, both as standalone solvers and as a source of bounds~\citep{bergman2016decision}.
+
+The same structure carries over to the multiobjective setting. \citet{bergman2016multiobjective} first showed that a PF can be enumerated over an exact DD by propagating sets of nondominated labels top-down through the layers, with a single diagram encoding all objectives at once and each arc carrying a vector of costs. \citet{bergman2022network} then recast MODO as a multicriteria network problem over the DD, which unifies label propagation with network-flow machinery and yields strong performance on problems with several objectives and tens to hundreds of decision variables---outperforming ILP-based enumeration on structured problems such as multiobjective knapsack and shortest path.
+
+A DD by itself, however, does not make PF enumeration cheap. Every node stores a nondominated set of labels for the partial paths that reach it. Expanding a layer generates new candidate labels along outgoing arcs, merges them into each destination node's frontier, and discards the ones some other label dominates. This dominance filtering is the dominant cost: in the worst case it compares every candidate at a node against every other candidate, and label sets grow quickly with the number of objectives. Enumeration also works inward from both ends of the diagram, alternating between expanding forward from the root and backward from the terminal until the two meet at a shared middle layer, the \emph{cutset}, where the root-side and terminal-side frontiers are combined and filtered once more. Existing DD-based MODO solvers perform all of this one node and one comparison at a time.
+
+This paper studies how to parallelize exact DD-based PF enumeration. While parallelism has been exploited in DDs for single-objective search~\citep{bergman2014parallel,perez2018parallel,tardivo2024cp,tardivo2026gpu}, PF enumeration exposes a different and richer decomposition, because the expensive work is set-valued rather than scalar. Layer expansion can be distributed over nodes; candidate generation and dominance checks can be distributed over labels within a node; and the final cutset merge can be organized as a parallel reduction over nondominated sets. These forms of parallelism map differently to multi-core CPUs and GPUs. CPUs are effective for node-level work sharing and tree-structured frontier reduction, whereas GPUs can expose finer-grained parallelism by materializing candidates in flat buffers and filtering them with data-parallel kernels.
+
+We make the following contributions:
+\begin{itemize}
+    \item We identify where bidirectional PF enumeration decomposes for parallel execution: across nodes within a layer, across labels within a node, and across products and merges in the coupling phase.
+    \item We build a CPU implementation that dynamically schedules node expansion over OpenMP threads and reduces cutset frontiers with a lock-free pairwise tree merge.
+    \item We develop a GPU implementation that flattens the diagram into offset-indexed arc arrays, expands each layer with a four-kernel pipeline, and merges the cutset in memory-bounded batches against a running frontier.
+    \item We evaluate on MOKP, MOSPP, and MOTSP instances with up to seven objectives against a state-of-the-art MIP baseline~\citep{dachert2024simple} and the state-of-the-art serial DD baseline~\citep{bergman2022network}, and show that our parallel CPU and GPU variants cut enumeration time relative to serial DD by up to $7.83\times$ and $20.88\times$ respectively, with the GPU fastest when frontiers fit in device memory and the CPU more reliable when they do not.
+\end{itemize}
+
+- Gently introduce the multiobjective problem and specify that we focus on integer linear problems. 
+- Then talk about existing ILP methods: decision space search and objective space search. 
+- The talk about their limitations.
+
+- Talk about decision diagrams (DDs) and their use in solving discrete optimization problems. 
+- Briefly talk about their advantages over ILP methods: better at handling symmetry leading
+- Then talk about their use to solve multiobjective problems. 
+- Start with the bergman cire 2016 reference and then talk about the bergman 2022 reference.
+
 
 Mixed integer programming (MIP)-based techniques are typically used to enumerate the PF, which can be classified into either decision-space search or objective-space search method \cite{halffmann2022exact}. Recently, decision diagrams (DDs) have emerged as a promising approach to solve single-objective discrete optimization problems \cite{bergman2016decision}. alternative to MIP for exact multiobjective optimization \cite{bergman2016multiobjective,bergman2022network}. DDs are layered acyclic graphs that compactly represent the feasible set of a discrete optimization problem with a dynamic programming structure. The PF can be enumerated by propagating nondominated labels through the DD. However, the dominance filtering at each node is expensive, as it compares every candidate label against every other candidate at that node. Existing DD-based methods perform this filtering serially, which becomes a bottleneck for large problems.
 
