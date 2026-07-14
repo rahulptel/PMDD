@@ -467,48 +467,6 @@ ParetoFrontier *couple_cutsets_cuda(int cutset_nodes,
 
     int batch_begin = 0;
     while (batch_begin < static_cast<int>(nz_nodes.size())) {
-        // Drop remaining nodes whose ideal point is already dominated-or-equal by the
-        // running frontier: every product such a node could form is dominated too, so
-        // it never needs to be materialized. The frontier only grows, so this check is
-        // re-run each iteration (a node not prunable now may become prunable later).
-        if (frontier_size > 0) {
-            const int remaining = static_cast<int>(nz_nodes.size()) - batch_begin;
-            thrust::device_vector<int> ub_alive(remaining, 0);
-            mark_dominated_or_equal_by_frontier_kernel<<<ceil_div(remaining, kThreadsPerBlock),
-                                                          kThreadsPerBlock>>>(
-                thrust::raw_pointer_cast(d_ub_points.data()) + batch_begin * NOBJS, remaining,
-                thrust::raw_pointer_cast(d_frontier_pts.data()), frontier_size,
-                thrust::raw_pointer_cast(ub_alive.data()));
-            if (!sync_kernel("ub_prune_check", reason))
-                return NULL;
-
-            const int kept = thrust::reduce(ub_alive.begin(), ub_alive.end(), 0);
-            if (kept < remaining) {
-                thrust::device_vector<ObjType> ub_suffix(d_ub_points.begin() + batch_begin * NOBJS,
-                                                         d_ub_points.end());
-                int suffix_n = remaining;
-                if (!compact_points_by_alive(ub_suffix, suffix_n, ub_alive, kept,
-                                             "ub_prune_compact", reason)) {
-                    return NULL;
-                }
-                d_ub_points.resize(batch_begin * NOBJS + kept * NOBJS);
-                thrust::copy(ub_suffix.begin(), ub_suffix.end(),
-                            d_ub_points.begin() + batch_begin * NOBJS);
-
-                thrust::host_vector<int> h_alive = ub_alive;
-                int w = batch_begin;
-                for (int r = batch_begin; r < static_cast<int>(nz_nodes.size()); ++r) {
-                    if (h_alive[r - batch_begin]) {
-                        nz_nodes[w++] = nz_nodes[r];
-                    }
-                }
-                nz_nodes.resize(w);
-            }
-            if (batch_begin >= static_cast<int>(nz_nodes.size())) {
-                break;
-            }
-        }
-
         long long bprod_total = 0;
         int batch_end = batch_begin;
         while (batch_end < static_cast<int>(nz_nodes.size())) {
@@ -584,6 +542,59 @@ ParetoFrontier *couple_cutsets_cuda(int cutset_nodes,
         if (stats != NULL) {
             stats->work_frontier_survivors_total += batch_frontier_size;
         }
+
+        // Incremental ideal-point check (improvements.md 3.1 fix): a still-remaining
+        // node's ub point only needs testing against points *appended* to the running
+        // frontier since it was last checked, not the whole frontier. d_batch_points at
+        // this point is exactly this batch's clean, frontier-filtered, self-pruned
+        // survivor set -- precisely what's about to be appended (merge_clean_points_
+        // into_frontier's own internal vs-frontier filter below is then a no-op, since
+        // nothing has touched d_frontier_pts since the filter already applied above).
+        //
+        // This is exact, not a heuristic: if some now-superseded frontier point f_old
+        // dominated-or-tied a node's ub, f_old can only have been removed by a
+        // strictly-dominating replacement f_new (see mark_frontier_dominated_by_batch_
+        // kernel), and f_new >= f_old >= ub componentwise, so f_new also dominates-or-
+        // ties ub. Every still-remaining node was already checked against every earlier
+        // batch's survivors (by induction from batch 0), so checking against just this
+        // batch's survivors here extends that same guarantee. Cost per batch drops from
+        // O(remaining x frontier_size) to O(remaining x batch_survivors) -- the former
+        // grows unboundedly over the run, the latter does not.
+        if (batch_frontier_size > 0 && batch_end < static_cast<int>(nz_nodes.size())) {
+            const int remaining = static_cast<int>(nz_nodes.size()) - batch_end;
+            thrust::device_vector<int> ub_alive(remaining, 0);
+            mark_dominated_or_equal_by_frontier_kernel<<<ceil_div(remaining, kThreadsPerBlock),
+                                                          kThreadsPerBlock>>>(
+                thrust::raw_pointer_cast(d_ub_points.data()) + batch_end * NOBJS, remaining,
+                thrust::raw_pointer_cast(d_batch_points.data()), batch_frontier_size,
+                thrust::raw_pointer_cast(ub_alive.data()));
+            if (!sync_kernel("ub_prune_check", reason))
+                return NULL;
+
+            const int kept = thrust::reduce(ub_alive.begin(), ub_alive.end(), 0);
+            if (kept < remaining) {
+                thrust::device_vector<ObjType> ub_suffix(d_ub_points.begin() + batch_end * NOBJS,
+                                                         d_ub_points.end());
+                int suffix_n = remaining;
+                if (!compact_points_by_alive(ub_suffix, suffix_n, ub_alive, kept,
+                                             "ub_prune_compact", reason)) {
+                    return NULL;
+                }
+                d_ub_points.resize(batch_end * NOBJS + kept * NOBJS);
+                thrust::copy(ub_suffix.begin(), ub_suffix.end(),
+                            d_ub_points.begin() + batch_end * NOBJS);
+
+                thrust::host_vector<int> h_alive = ub_alive;
+                int w = batch_end;
+                for (int r = batch_end; r < static_cast<int>(nz_nodes.size()); ++r) {
+                    if (h_alive[r - batch_end]) {
+                        nz_nodes[w++] = nz_nodes[r];
+                    }
+                }
+                nz_nodes.resize(w);
+            }
+        }
+
         if (!merge_clean_points_into_frontier(d_frontier_pts, frontier_size, d_batch_points,
                                               batch_frontier_size, reason)) {
             return NULL;
