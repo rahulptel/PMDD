@@ -16,10 +16,27 @@ layer-selection *heuristic* (not correctness) is flagged explicitly.
 
 ## Status log — updated 2026-07-14
 
-Three items have been attempted, on two branches cut from `aaai` (each in its own
+Four items have been attempted, on two branches cut from `aaai` (each in its own
 worktree). The branches are **disjoint and have not been benchmarked together**.
 All numbers are from the local RTX A2000 (6 GB, shared with the desktop's Xorg) —
 read the measurement-protocol addendum below before trusting any delta under ~10%.
+
+**Headline finding (2026-07-14 re-measure):** §1.1+§1.2 measured together, with a
+clean same-session interleaved A/B (§3.1 reverted so it cannot contaminate), give
+only **~0–3% and mostly within noise** — TSP-3 +2.6%, set-pack bp-100 +1.7%,
+bp-150 −0.3%/+3.1%, TSP-5 seed13095 +0.8%. Not the "large speedup on
+layer-dominated instances" §1 predicts. Root cause: none of these instances is
+launch/sync-bound at the tested scale. Even the 0.10s TSP-3 spends its time in
+dominance/join compute, not in the ~10 µs/launch overhead, because layer counts
+(10–150) are small and per-node frontiers are large — kernel execution dominates
+launch latency everywhere. **Corollary: killing the syncs does not unlock §3.1** —
+that was the hypothesis and the answer is no; §3.1's own check-schedule (below) is
+the lever, not sync overhead. §1.1+§1.2 are correct, free, and worth keeping as a
+~1–3% cleanup, but they are not an enabler. The earlier "§1.1 alone: TSP-3
+2.74s → 0.14s" figure was a **cold-JIT artifact** (no `-arch` in the build ⇒ the
+first run of a freshly-built binary JIT-compiles PTX; the driver caches it after,
+so only run #1 pays it). Do §8.1 (`-arch=native`) so first-run numbers stop lying,
+and never trust a single un-warmed run.
 
 ### Build prerequisites (any new branch cut from `aaai`/`main`)
 
@@ -51,28 +68,54 @@ against the CPU reference.
   set-packing BDD (many arcs × small per-arc frontiers, so the skip saves little
   while the arc-id loads still cost).
 
-### §1.1 kill per-kernel sync — DONE BUT INCOMPLETE (branch `exp/ideal-point-pruning`, commit dc579ba)
+### §1.1 kill per-kernel sync — DONE (branch `exp/ideal-point-pruning`, commit dc579ba)
 
 `sync_kernel()` now does only the async `cudaGetLastError()` check; the old
 behavior is behind `PMDD_CUDA_SYNC_DEBUG`. The redundant explicit sync before
-`thrust::reduce` in `compute_expansion_score` is also gone.
+`thrust::reduce` in `compute_expansion_score` is also gone. Measured **together
+with §1.2** — see that entry; alone it is not separable and not worth measuring
+(removing the explicit sync just relocates the wait into §1.2's blocking reads).
 
-Measured: TSP-3 coupled (tiny, launch-bound) 2.74s → 0.14s — the mechanism works
-where the doc said it would. But on large instances there was **no gain**
-(TSP-5 seed13095 coupled: 163.7s cross-day baseline vs 169–174s over two runs;
-150/7 set-packing total 260.2s → 253.2s ≈ noise). Two causes, both foreseeable:
+Note still open: the BDD top-down path (`enumerate_bdd_topdown`, topdown.cu) and
+the MDD/BDD coupled drivers (enum.cu) wrap each layer's expansion in a
+`ScopedCudaEventTimer` whose `finish_and_add()` calls `cudaEventSynchronize` —
+a per-*layer* sync (not per-kernel, so much coarser than the pathology §1.1
+removed, and an acceptable granularity). It is always active because main.cpp
+always passes stats. Not a bottleneck at current scale, but if a future
+streams/overlap item (§5) needs the layers truly async, make these timers
+opt-in.
 
-1. **§1.2 was skipped.** Every layer/batch iteration still blocks the host on
-   single-element `device_vector` reads/writes and `thrust::reduce`-to-host
-   calls (see the §1.2 list — all of those sites are still live). Removing the
-   explicit sync just relocates the wait into the next blocking read. §1.1 and
-   §1.2 are one unit; measuring them separately measures nothing.
-2. **The BDD top-down path is still fully synced by its timers.**
-   `enumerate_bdd_topdown` (topdown.cu) wraps every kernel in a
-   `ScopedCudaEventTimer` whose `finish_and_add()` calls `cudaEventSynchronize`
-   — a per-kernel sync by another name, active whenever stats are collected
-   (main.cpp always passes stats). Convert these to per-phase timers (or make
-   them opt-in) before expecting §1.1 to show up on BDD method=1 runs.
+### §1.2 eliminate single-element device_vector reads/writes — DONE (branch `exp/ideal-point-pruning`, commit 249e65a)
+
+Converted every per-layer `exclusive_scan(counts→offsets)` + `offsets[n-1]` /
+`counts[n-1]` readback + `offsets[n]=total` write into one
+`inclusive_scan(counts, offsets.begin()+1)` (offsets[0] stays 0 from zero-init,
+offsets[n] gets the total on-device); the total is read back at most once where
+the host must branch, and not at all where it was already known host-side. Six
+sites in `bottomup.cu` (`expand_layer_frontiers`, the shared MDD/BDD coupled hot
+path) + five frontier-init sites in `enum.cu`; also dropped two redundant
+`thrust::reduce`-to-host block-count recomputes. The two surviving
+`exclusive_scan`s (`d_alive_prefix`) genuinely need exclusive semantics for the
+compaction scatter. Exact frontier equality + solution counts re-verified.
+
+**Combined §1.1+§1.2 measurement** (both binaries built from the same tree
+differing *only* in these two items, §3.1 reverted out, same-session interleaved
+A/B, median of 3–5 reps):
+
+| instance | scale | A baseline | B 1.1+1.2 | Δ |
+|---|---|---|---|---|
+| TSP-3 seed12870 coupled | 0.10 s | 0.103 | 0.100 | +2.6% |
+| set-pack bp-100 coupled | 1.4 s | 1.431 | 1.408 | +1.7% |
+| set-pack bp-150-15095 coupled | 11 s | 11.380 | 11.411 | −0.3% |
+| set-pack bp-150-19703 coupled | 13 s | 13.044 | 12.636 | +3.1% |
+| TSP-5 seed13095 coupled | 175 s | 174.61 | 173.17 | +0.8% |
+
+Consistent small positive, all within run-to-run noise; B's spread was tighter
+on TSP-5 (A 173.9–180.1 vs B 172.9–173.5). **Keep it** (free, correct, removes
+real syncs) but do not expect it to move the needle or to enable §3.1 — the
+headline finding at the top explains why (nothing here is launch-bound). Verdict
+matches the theory but *not* the doc's optimistic "large speedup" estimate;
+update that expectation for anyone doing §5 later.
 
 ### §3.1 ideal-point pruning — DONE, NEEDS CHECK-SCHEDULE REWORK before judging (branch `exp/ideal-point-pruning`, commit 489726e)
 
@@ -128,15 +171,29 @@ median, and treat single-run per-instance deltas under ~10% as noise.
 
 ### Recommended order from here
 
-1. §1.2 (device-side final-offset scans + one folded readback), then re-measure
-   §1.1+§1.2 *as one unit* on TSP-5 coupled and 2–3 of the 150/7 seeds.
-2. §2.1 pooled/caching allocator — also removes the hidden per-thrust-call temp
-   allocations, which are themselves synchronizing.
-3. Fix §3.1's check schedule (list above) and re-judge it.
+§1.1 and §1.2 are now both done and measured together (~0–3%, within noise —
+see the headline finding). What's left, in priority order:
+
+1. **§3.1 check-schedule rework** — the one item with a real pending win
+   (55% of set-packing join products already provably skippable; the
+   non-incremental check is eating it). Fix list in the §3.1 status entry. This
+   is now the highest-value next step, ahead of §2.1, because the algorithmic
+   headroom is already demonstrated.
+2. §2.1 pooled/caching allocator — the hot loops (`couple.cu` batch loop, §3.1's
+   own compaction) still `cudaMalloc`/`cudaFree` fresh `device_vector`s every
+   iteration, and those are implicit syncs. This is likely why §1.1+§1.2 alone
+   were flat: the sync moved from explicit calls into the allocator. Do this
+   before concluding the join is compute-bound rather than alloc-bound.
+3. §8.1 `-arch=native` — trivial, and stops first-run JIT from poisoning
+   single-run measurements (see headline finding). Do it early.
 4. §3.2 segmented self-prune — same construction-based argument as §4.1, applied
    to the join; independent of the above.
 5. Merge `exp/skip-same-edge-dominance` (§4.1) — verified but never benchmarked
    in combination with the rest.
+
+Do NOT invest more in §1 (sync/round-trip elimination) expecting speed: it is
+done, correct, and ~noise. The bottleneck is join compute + allocation, not
+launch/sync latency, on every instance tested.
 
 ---
 
@@ -144,9 +201,10 @@ median, and treat single-run per-instance deltas under ~10% as noise.
 
 ### 1.1 [P0] `sync_kernel` calls `cudaDeviceSynchronize()` after every launch
 
-> **Status 2026-07-14: implemented** (`exp/ideal-point-pruning`, dc579ba) but
-> ineffective alone on large instances — §1.2's blocking reads and the BDD
-> top-down path's per-kernel `ScopedCudaEventTimer` syncs remain. See status log.
+> **Status 2026-07-14: DONE** (`exp/ideal-point-pruning`, dc579ba), measured with
+> §1.2 (249e65a). Combined ~0–3%, within noise — the "large speedup" claim below
+> did not hold; nothing tested is launch-bound. See status log. Kept as free
+> cleanup; not an enabler.
 
 `enum_types.cuh:93` — every kernel in the pipeline is followed by
 `cudaGetLastError()` + `cudaDeviceSynchronize()`. A single layer expansion issues
@@ -165,6 +223,11 @@ Fix:
 Expected: large speedup on layer-dominated instances; essentially free.
 
 ### 1.2 [P0] Eliminate single-element `device_vector` reads/writes
+
+> **Status 2026-07-14: DONE** (`exp/ideal-point-pruning`, 249e65a). All
+> `bottomup.cu` + `enum.cu` sites converted to `inclusive_scan` into
+> `begin()+1`. `topdown.cu`'s BDD-top-down-only sites (642-646, 720-723) are
+> NOT done — they are off the coupled path and were not measured. See status log.
 
 Each `d_vec[i]` access on a `thrust::device_vector` is a blocking 4-byte
 `cudaMemcpy`. Hot examples per layer / per batch:
