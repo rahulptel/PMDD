@@ -29,6 +29,7 @@
 \usepackage[capitalize,noabbrev]{cleveref}
 \usetikzlibrary{positioning, fit, backgrounds, calc, decorations.pathreplacing}
 \usepackage{multirow}
+\usepackage{placeins}
 
 \title{Parallel Multiobjective Decision Diagrams} %TODO Please add
 
@@ -88,7 +89,7 @@ This paper investigates the parallelization of exact DD-based PF enumeration.
 %     \item We develop a GPU implementation that flattens the diagram into offset-indexed arc arrays, expands each layer with a four-kernel pipeline, and merges the cutset in memory-bounded batches against a running frontier.
 %     \item We evaluate on MOKP, MOSPP, and MOTSP instances with up to seven objectives against a state-of-the-art MIP baseline~\citep{dachert2024simple} and the state-of-the-art serial DD baseline~\citep{bergman2022network}, and show that our parallel CPU and GPU variants cut enumeration time relative to serial DD by up to $7.83\times$ and $20.88\times$ respectively, with the GPU fastest when frontiers fit in device memory and the CPU more reliable when they do not.
 % \end{itemize}
-We make the following contributions. We identify three sources of parallelism in bidirectional PF enumeration, namely node expansion within a layer, label processing within a node, and frontier products and merges during the coupling phase. We develop a CPU implementation that dynamically distributes node expansion across OpenMP threads and combines cutset frontiers using a lock-free pairwise reduction tree. We develop a GPU implementation that flattens the diagram into offset-indexed arc arrays, expands each layer with a four-kernel pipeline, and merges the cutset in memory-bounded batches against a running frontier. We evaluate the proposed methods on multiobjective variants of knapsack, set packing and traveling salesperson instances. We compare them with a state-of-the-art MIP method~\citep{dachert2024simple} and a state-of-the-art serial DD method~\citep{bergman2022network}. Relative to the serial DD method, the CPU and GPU implementations reduce enumeration time by up to $7.83\times$ and $20.88\times$, respectively. The GPU performs best when the frontiers fit in device memory, while the CPU is more robust when they do not.
+We make the following contributions. We identify three sources of parallelism in bidirectional PF enumeration, namely node expansion within a layer, label processing within a node, and frontier products and merges during the coupling phase. We develop a CPU implementation that dynamically distributes node expansion across OpenMP threads and combines cutset frontiers using a lock-free pairwise reduction tree. We develop a GPU implementation that flattens the diagram into offset-indexed arc arrays, expands each layer through a four-stage pipeline, and merges the cutset in batches against a running frontier. We evaluate the proposed methods on multiobjective variants of knapsack, set packing and traveling salesperson instances. We compare them with a state-of-the-art MIP method~\citep{dachert2024simple} and a state-of-the-art serial DD method~\citep{bergman2022network}. Relative to the serial DD method, the CPU and GPU implementations reduce enumeration time by up to $7.83\times$ and $20.88\times$, respectively. The GPU performs best when the frontiers fit in device memory, while the CPU is more robust when they do not.
 
 % The remainder of this paper is organized as follows. \Cref{sec:prelim} provides background on MODO and DDs. \Cref{sec:method} describes the parallel enumeration methodology. \Cref{sec:results} presents the computational evaluation. \Cref{sec:related} reviews related work. \Cref{sec:conclusion} concludes the paper.
 
@@ -351,11 +352,8 @@ cutset-product batch limit $B_{\max}^{\mathrm{prod}}$
     {\mathcal{Y},b,\phi^a}$
 
     \State
-    Partition $\mathcal{L}_j$ into candidate batches
-    $\mathcal{Q}_1,\mathcal{Q}_2,\dots$
-    such that
-    $\sum_{v\in\mathcal{Q}_k}\Gamma_v
-    \le B_{\max}^{\mathrm{cand}}$
+    Partition $\mathcal{L}_j$ into batches with target
+    $B_{\max}^{\mathrm{cand}}$
 
     \State
     $\mathcal{Y}^{\mathrm{next}}\gets\emptyset$
@@ -433,15 +431,10 @@ cutset-product batch limit $B_{\max}^{\mathrm{prod}}$
 
     \State
     $\mathcal{Y}^{\mathrm{global}}\gets\emptyset$
-
+    
     \State
-    Partition $\mathcal{V}_c^*$ into batches
-    $\mathcal{B}_1,\mathcal{B}_2,\dots$
-    such that
-    $\sum_{v\in\mathcal{B}_k}
-    \kappa_v^{\downarrow}
-    \kappa_v^{\uparrow}
-    \le B_{\max}^{\mathrm{prod}}$
+    Partition $\mathcal{V}_c^*$ into batches with target
+    $B_{\max}^{\mathrm{prod}}$        
 
     \For{\textbf{each} batch $\mathcal{B}$}
         \State
@@ -485,9 +478,9 @@ cutset-product batch limit $B_{\max}^{\mathrm{prod}}$
 \end{algorithmic}
 \end{algorithm}
 
-For each layer $j$ and traversal direction $d\in\{\downarrow,\uparrow\}$, the flattened representation stores the arc weights $\mathbf{b}_j^d$, the corresponding node indices $\mathbf{v}_j^d$, and the per-node arc offsets $\boldsymbol{\phi}_{a,j}^d$, together with the node degrees $\boldsymbol{\delta}_j^{\mathrm{in}}$ and $\boldsymbol{\delta}_j^{\mathrm{out}}$. These arrays are constructed once and reused throughout enumeration. In particular, the offsets $\boldsymbol{\phi}_{a,j}^d$ organize the arcs incident to each node into contiguous segments, allowing each layer expansion to operate on contiguous regions of the arc and candidate arrays.
+For each layer $j$ and traversal direction $d\in\{\downarrow,\uparrow\}$, the flattened representation stores the adjacent-node indices $b_j^d$, the corresponding arc weights $\mathbf{v}_j^d$, and the per-node arc offsets $\phi_j^{a,d}$, together with the node degrees $\delta_j^{\mathrm{in}}$ and $\delta_j^{\mathrm{out}}$. These arrays are constructed once and reused throughout enumeration. In particular, the offsets $\phi_j^{a,d}$ organize the arcs incident to each node into contiguous segments, allowing each layer expansion to operate on contiguous regions of the arc and candidate arrays.
 
-For a selected layer, \textsc{ExpandLayer}$_{\mathrm{GPU}}$ partitions the destination nodes into batches whose candidate counts are bounded by $B_{\max}^{\mathrm{cand}}$. Within each batch $\mathcal{Q}$, it calls the four subroutines detailed in \Cref{app:gpu_implementation}, \Cref{alg:compute_arc_offsets,alg:expand_candidates,alg:dynamic_1D_kernel,alg:compact_survivors}. 
+For a selected layer, \textsc{ExpandLayer}$_{\mathrm{GPU}}$ partitions consecutive destination nodes into batches targeting at most $B_{\max}^{\mathrm{cand}}$ candidates. A node is not divided across batches; hence, a singleton batch may exceed this target when $\Gamma_v>B_{\max}^{\mathrm{cand}}$. The number of candidates materialized in one batch is therefore at most $\max\{B_{\max}^{\mathrm{cand}},\max_v\Gamma_v\}$. Within each batch $\mathcal{Q}$, it calls the four subroutines detailed in \Cref{app:gpu_implementation}, \Cref{alg:compute_arc_offsets,alg:expand_candidates,alg:dynamic_1D_kernel,alg:compact_survivors}. 
 % The dataflow is
 % \[
 %     \mathcal{Y}
@@ -500,9 +493,9 @@ Here $\kappa_a$ is the number of candidates generated by arc $a$, $\phi^c_a$ is 
 
 First, \Cref{alg:compute_arc_offsets} counts the candidates generated by each arc and uses a prefix sum to assign disjoint output segments. Second, \Cref{alg:expand_candidates} materializes the shifted labels for the current batch. Candidates generated by different arcs occupy disjoint memory, while candidates assigned to the same node form one contiguous segment. Third, \Cref{alg:dynamic_1D_kernel} filters each node segment using a load-balanced grid of thread blocks, assigning more blocks to larger segments. Fourth, \Cref{alg:compact_survivors} compacts the surviving labels into the next node-frontier representation.
 
-The candidate-then-filter ordering distinguishes the GPU backend from the CPU backend. A CPU worker can incrementally insert candidates into the frontier it owns. On the GPU, however, each insertion would depend on the current retained set and would therefore serialize updates to a shared node frontier. Materializing a batch first removes this dependency from candidate generation and exposes the dominance comparisons in the subsequent filtering stage. The resulting parallelism comes at the cost of temporary candidate storage, which is controlled by $B_{\max}^{\mathrm{cand}}$.
+The candidate-then-filter ordering distinguishes the GPU backend from the CPU backend. A CPU worker can incrementally insert candidates into the frontier it owns. On the GPU, however, each insertion would depend on the current retained set and would therefore serialize updates to a shared node frontier. Materializing a batch first removes this dependency from candidate generation and exposes the dominance comparisons in the subsequent filtering stage. The resulting parallelism requires temporary candidate storage. The target $B_{\max}^{\mathrm{cand}}$ controls this storage across nodes but is not a hard bound when one node alone exceeds the target; persistent node frontiers and DD arrays also remain resident in device memory.
 
-\textsc{Couple}$_{\mathrm{GPU}}$ in \Cref{alg:gpu_bidir_pf} uses a separate schedule. It sorts the nodes in descending order of the sum of their frontier cardinalities, and partitions them into batches containing at most $B_{\max}^{\mathrm{prod}}$ products. For each batch, \Cref{alg:materialize_cutset_products} materializes the pairwise sums, which are filtered against the current global frontier, self-pruned, and merged into that frontier. Unlike the CPU backend, the GPU therefore uses a batched running-frontier merge rather than a tree reduction. Batching does not change the result. After each batch, the global frontier is the nondominated union of all cutset products processed so far. Filtering a new batch against this frontier removes labels dominated by earlier batches, while the subsequent merge removes earlier labels dominated by the new survivors. The final set is therefore the same nondominated union over all active cutset nodes, computed with bounded product materialization.
+\textsc{Couple}$_{\mathrm{GPU}}$ in \Cref{alg:gpu_bidir_pf} uses a separate schedule. It sorts the nodes in descending order of the sum of their frontier cardinalities, and partitions them into batches targeting at most $B_{\max}^{\mathrm{prod}}$ products. Since the product of one node is not divided, a singleton batch may exceed this target; the number of products materialized in one batch is at most $\max\{B_{\max}^{\mathrm{prod}},\max_v \kappa_v^{\downarrow}\kappa_v^{\uparrow}\}$. For each batch, \Cref{alg:materialize_cutset_products} materializes the pairwise sums, which are filtered against the current global frontier, self-pruned, and merged into that frontier. Unlike the CPU backend, the GPU therefore uses a batched running-frontier merge rather than a tree reduction. Batching does not change the result. After each batch, the global frontier is the nondominated union of all cutset products processed so far. Filtering a new batch against this frontier removes labels dominated by earlier batches, while the subsequent merge removes earlier labels dominated by the new survivors. The final set is therefore the same nondominated union over all active cutset nodes.
 
 
 \section{Experiments}
@@ -513,7 +506,7 @@ We evaluate \textsc{Pmdd} by addressing three research questions. \textbf{RQ1:} 
 \subsection{Computational Setup}
 \label{sec:setup}
 
-We conducted all experiments on a cluster equipped with an Intel Xeon 6972P CPU running at 2.4\,GHz and an NVIDIA H100 GPU. We imposed a one-hour time limit per instance, with memory limits of 16\,GB on the CPU and 20\,GB on the GPU. Our implementation builds on the C++ code of \citet{bergman2022network} and was compiled using C++14, OpenMP 4.5 for CPU parallelism, and NVCC 12.6 for GPU acceleration. We evaluate \textsc{PmddC} with 4, 8, and 16 threads, denoted by \textsc{PmddC}$(t)$, where $t \in \{4,8,16\}$ denotes the number of threads. The \textsc{Smdd} baseline is based on the original implementation of \citet{bergman2022network}. This baseline applies their bidirectional enumeration algorithm \texttt{Coup}$^+$ to MOKP and \texttt{Coup} to MOSPP and MOTSP; the ``$+$'' indicates that pruning based on state dominance is enabled. The corresponding \textsc{PmddC} and \textsc{PmddG} experiments combine the parallel enumeration along with state-dominance pruning. As an additional baseline for \textsc{PmddG},  we report the performance of top-down enumeration on GPU (\textsc{PmddG-TD}). The DPA baseline is based on the implementation of \citet{dachert2024simple}; the two variants of this algorithm are referred to as DPA with augmented $\epsilon$-constraint (DPA-A) and DPA with two-stage (DPA-TS). The DPA was shown to outperform the criterion-space methods against which \textsc{Smdd} was previously evaluated, but these two lines of work have not been compared directly. Our comparison therefore evaluates whether DD-based enumeration remains competitive with this stronger MIP baseline.
+We conducted all experiments on a cluster equipped with an Intel Xeon 6972P CPU running at 2.4\,GHz and an NVIDIA H100 GPU. We imposed a one-hour time limit per instance, with memory limits of 16\,GB on the CPU and 20\,GB on the GPU. Our implementation builds on the C++ code of \citet{bergman2022network} and was compiled using C++14, OpenMP 4.5 for CPU parallelism, and NVCC 12.6 for GPU acceleration. Following \citet{bergman2022network}, we set the balancing parameter in Algorithm~\ref{alg:bidir_pf} to $\lambda=1.5$. We evaluate \textsc{PmddC} with 4, 8, and 16 threads, denoted by \textsc{PmddC}$(t)$, where $t \in \{4,8,16\}$ denotes the number of threads. The \textsc{Smdd} baseline is based on the original implementation of \citet{bergman2022network}. This baseline applies their bidirectional enumeration algorithm \texttt{Coup}$^+$ to MOKP and \texttt{Coup} to MOSPP and MOTSP; the ``$+$'' indicates that pruning based on state dominance is enabled. The corresponding \textsc{PmddC} and \textsc{PmddG} experiments combine the parallel enumeration along with state-dominance pruning. As an additional baseline for \textsc{PmddG},  we report the performance of top-down enumeration on GPU (\textsc{PmddG-TD}). The DPA baseline is based on the implementation of \citet{dachert2024simple}; the two variants of this algorithm are referred to as DPA with augmented $\epsilon$-constraint (DPA-A) and DPA with two-stage (DPA-TS). The DPA was shown to outperform the criterion-space methods against which \textsc{Smdd} was previously evaluated, but these two lines of work have not been compared directly. Our comparison therefore evaluates whether DD-based enumeration remains competitive with this stronger MIP baseline.
 
 We use the benchmark instances provided in \citet{bergman2022network} for comparing different algorithms. Specifically, we test on the multiobjective knapsack problem (MOKP), set packing problem (MOSPP), and traveling salesperson problem (MOTSP). Each problem setting contains 10 instances. We focus on problem sizes for which \textsc{Smdd} required at least five seconds of total runtime. We report the arithmetic mean of enumeration wall-clock time over the solved instances and the corresponding speedup relative to \textsc{Smdd}. The notation $S^{(M,T)}$ gives the number of solved instances $S$, with $M$ out-of-memory failures and $T$ timeouts; hence, $S+M+T=10$ for every problem setting. A dash indicates that no instance was solved.
 
@@ -659,28 +652,34 @@ This execution model is well suited for workloads dominated by large numbers of 
 \section{Implementation Details}
 \label{app:implementation_details}
 
-This appendix gives pseudocode for implementation details referenced in the main text but omitted there for space. The CPU detail is the pairwise reduction used to merge private cutset frontiers. The GPU details are the lower-level kernels used by Algorithm~\ref{alg:gpu_bidir_pf}.
+
+This appendix details the parallel operations referenced in the main text. The CPU routine merges the private cutset frontiers constructed by \textsc{Couple}$_{\mathrm{CPU}}$. The GPU routines implement the four stages of \textsc{ExpandLayer}$_{\mathrm{GPU}}$ and the product materialization used by \textsc{Couple}$_{\mathrm{GPU}}$ in \Cref{alg:gpu_bidir_pf}. These routines concern objective-label propagation and filtering. 
+% The optional state-dominance pruning used by the ``$+$'' variants is problem-specific and is not part of this generic pipeline.
 
 \subsection{CPU Parallelization}
 \label{app:cpu_implementation}
 
-The CPU implementation uses the tree reduction in \Cref{alg:cpu_tree_reduction} to merge private cutset frontiers produced by different workers. This is the reduction referred to in \Cref{sec:cpu_impl}.
+During cutset coupling, each worker accumulates the products of its assigned cutset nodes in a private nondominated frontier. Since no frontier is shared at this stage, the private frontiers can be combined in pairs without synchronization between pairs. \Cref{alg:cpu_tree_reduction} repeats these pairwise merges until one frontier remains. An unpaired frontier advances unchanged to the next level.
 
 \begin{algorithm}[htbp]
 \caption{CPU Tree Reduction for Cutset Frontiers}
 \label{alg:cpu_tree_reduction}
 \begin{algorithmic}[1]
-\Require Private cutset frontiers $\mathcal{P} = [\mathcal{P}_1,\dots,\mathcal{P}_q]$
+\Require Private cutset frontiers $\mathcal{P}=[\mathcal{P}_1,\dots,\mathcal{P}_q]$
 \Procedure{TreeReduce}{$\mathcal{P}$}
-    \While{$|\mathcal{P}| > 1$}
-        \State $\mathcal{Q} \gets [\,]$
-        \ForAll{$i = 1,3,5,\dots,2\lfloor |\mathcal{P}|/2 \rfloor - 1$ \textbf{in parallel}}
-            \State $\mathcal{Q}_{(i+1)/2} \gets \Call{FilterDominated}{\mathcal{P}_i \cup \mathcal{P}_{i+1}}$
+    \If{$|\mathcal{P}|=0$}
+        \State \Return $\emptyset$
+    \EndIf
+    \While{$|\mathcal{P}|>1$}
+        \State $h\gets\lfloor |\mathcal{P}|/2\rfloor$ and $\mathcal{Q}\gets[\,]$
+        \ForAll{$r=1,\dots,h$ \textbf{in parallel}}
+            \State $\mathcal{Q}_r\gets
+            \Call{FilterDominated}{\mathcal{P}_{2r-1}\cup\mathcal{P}_{2r}}$
         \EndFor
         \If{$|\mathcal{P}|$ is odd}
-            \State $\mathcal{Q}_{\lfloor |\mathcal{P}|/2 \rfloor + 1} \gets \mathcal{P}_{|\mathcal{P}|}$
+            \State $\mathcal{Q}_{h+1}\gets\mathcal{P}_{|\mathcal{P}|}$
         \EndIf
-        \State $\mathcal{P} \gets \mathcal{Q}$
+        \State $\mathcal{P}\gets\mathcal{Q}$
     \EndWhile
     \State \Return $\mathcal{P}_1$
 \EndProcedure
@@ -690,146 +689,158 @@ The CPU implementation uses the tree reduction in \Cref{alg:cpu_tree_reduction} 
 \subsection{GPU Parallelization}
 \label{app:gpu_implementation}
 
-The GPU implementation expands each selected layer through the four-kernel pipeline described in \Cref{sec:gpu_impl}. \Cref{alg:compute_arc_offsets} computes per-arc candidate counts and buffer offsets. \Cref{alg:expand_candidates} then materializes shifted candidate labels in the assigned buffer segments. \Cref{alg:dynamic_1D_kernel} performs load-balanced dominance filtering, and \Cref{alg:compact_survivors} compacts the surviving labels into the next node-frontier representation. Finally, \Cref{alg:materialize_cutset_products} materializes the batched cutset products used by \textsc{Couple}$_{\mathrm{GPU}}$ in \Cref{alg:gpu_bidir_pf}.
+GPU layer expansion follows four logical stages, each of which may use multiple CUDA kernels or parallel scan operations. \Cref{alg:compute_arc_offsets} assigns a contiguous candidate segment to every arc and node. \Cref{alg:expand_candidates} materializes shifted labels in these segments. \Cref{alg:dynamic_1D_kernel} filters each node segment using a number of thread blocks proportional to its cardinality, and \Cref{alg:compact_survivors} converts the survivor flags into the flat frontier representation used by the next layer. \Cref{alg:materialize_cutset_products} separately materializes the node products required during cutset coupling.
 
-
-\Cref{alg:expand_candidates} uses the offsets from \Cref{alg:compute_arc_offsets} to write every generated candidate into a disjoint location of the flat buffer.
-\Cref{alg:dynamic_1D_kernel} assigns more thread blocks to nodes with larger candidate segments, so the dominance-filtering work is balanced at the level of node-frontier size.
-\Cref{alg:compact_survivors} converts the binary survivor flags produced by the dominance kernel into compacted node-frontier storage.
-\Cref{alg:materialize_cutset_products} is used during the batched cutset merge. It materializes the Cartesian products for a batch of active cutset nodes before filtering and merging them into the running global frontier.
-
-
+Let $\mathcal{Y}$ denote a flat label array, with $\phi^y_v$ giving the first label of node $v$. For an arc $a$, $b_a$ is the adjacent-node index, $\mathbf{v}_a$ is its objective weight, $\kappa_a$ is its candidate count, and $\phi^c_a$ is the beginning of its candidate segment. The arc offsets $\phi^a_v$ delimit the arcs assigned to node $v$, while $\Gamma_v$ is the total number of candidates in that node segment.
 
 \begin{algorithm}[t!]
-\caption{Compute Candidate Offsets}
+\caption{Compute GPU Candidate Offsets}
 \label{alg:compute_arc_offsets}
 \begin{algorithmic}[1]
-\Require Frontier $\mathcal{Y}$; source-node array $b[]$; incoming-arc offsets $\phi^a[]$
-\Procedure{ComputeArcOffsets}{$\mathcal{Y}, b, \phi^a$}
-\State $M \gets |\mathcal{A}_{\mathcal{L}_j}|$ \Comment{Number of arcs in layer $j$}
-\ForAll{arcs $a = 0$ \textbf{to} $M-1$ \textbf{in parallel on GPU}} \Comment{One thread per arc}
-    \State $\kappa_a \gets |\mathcal{Y}(b(a))|$
-\EndFor
-\State $\phi^c_0 \gets 0$
-\For{$a = 1$ \textbf{to} $M$ \textbf{in parallel on GPU}}
-    \State $\phi^c_a \gets \phi^c_{a-1} + \kappa_{a-1}$
-\EndFor
-\ForAll{nodes $v \in \mathcal{L}_{j+1}$ \textbf{in parallel on GPU}}
-    \State $a_{\text{first}} \gets \phi^a_v$
-    \State $a_{\text{last}} \gets \phi^a_{v{+}1}$
-    \State $\Gamma_v \gets \phi^c_{a_{\text{last}}} - \phi^c_{a_{\text{first}}}$
-\EndFor
-\State \Return $\kappa, \phi^c, \Gamma$
+\Require Frontier offsets $\phi^y$; adjacent-node indices $b$; node-arc offsets $\phi^a$
+\Procedure{ComputeArcOffsets}{$\phi^y,b,\phi^a$}
+    \State $M\gets |b|$
+    \ForAll{arcs $a=0,\dots,M-1$ \textbf{in parallel on GPU}}
+        \State $\kappa_a\gets\phi^y_{b_a+1}-\phi^y_{b_a}$
+    \EndFor
+    \State $(\phi^c_0,\dots,\phi^c_M)
+    \gets\Call{ExclusiveOffsets}{\kappa_0,\dots,\kappa_{M-1}}$
+    \ForAll{nodes $v$ in the destination batch \textbf{in parallel on GPU}}
+        \State $\Gamma_v\gets
+        \phi^c_{\phi^a_{v+1}}-\phi^c_{\phi^a_v}$
+    \EndFor
+    \State \Return $\kappa,\phi^c,\Gamma$
 \EndProcedure
 \end{algorithmic}
 \end{algorithm}
 
+The scan in \Cref{alg:compute_arc_offsets} gives every arc a disjoint output interval. Since the arcs of a node are contiguous, their intervals also form one contiguous node segment. Candidate materialization can therefore proceed without atomic writes. The implementation distributes the arcs across the warps in the grid and lets the lanes of each warp generate the labels of one arc cooperatively, as shown in \Cref{alg:expand_candidates}.
 
 \begin{algorithm}[htbp!]
-\caption{Materialize Layer Candidates}
+\caption{Materialize GPU Layer Candidates}
 \label{alg:expand_candidates}
 \begin{algorithmic}[1]
-\Require Frontier $\mathcal{Y}$; source array $b[]$; arc weights $\mathbf{v}(\cdot)$; offsets $\phi^c[]$; counts $\kappa[]$
-\Procedure{ExpandCandidates}{$\mathcal{Y}, b, \mathbf{v}, \phi^c, \kappa$}
-\State Allocate flat buffer $\beta$ of size $\sum_a \kappa_a$
-\ForAll{arcs $a$ \textbf{in parallel on GPU}}
-    \State //~One warp (32 threads) per arc
-    \ForAll{$k = 0, 1, \dots, \kappa_a{-}1$ \textbf{distributed across warp threads}}
-        \State $\beta[\,\phi^c_a + k\,] \gets \mathcal{Y}(b(a))[k] + \mathbf{v}(a)$
+\Require Label array $\mathcal{Y}$; frontier offsets $\phi^y$; adjacent-node indices $b$; arc weights $\mathbf{v}$; candidate offsets $\phi^c$; counts $\kappa$
+\Procedure{ExpandCandidates}{$\mathcal{Y},\phi^y,b,\mathbf{v},\phi^c,\kappa$}
+    \State Allocate $\beta$ with $\phi^c_M$ labels
+    \State $W\gets$ number of warps in the grid
+    \ForAll{warps $w=0,\dots,W-1$ \textbf{in parallel on GPU}}
+        \For{$a=w,w+W,w+2W,\dots<M$}
+            \ForAll{$k=\ell,\ell+32,\dots<\kappa_a$ across warp lanes $\ell$}
+                \State $\beta[\phi^c_a+k]\gets
+                \mathcal{Y}[\phi^y_{b_a}+k]+\mathbf{v}_a$
+            \EndFor
+        \EndFor
     \EndFor
-\EndFor
-\State \Return $\beta$
+    \State \Return $\beta$
 \EndProcedure
 \end{algorithmic}
 \end{algorithm}
 
-
-\begin{algorithm}[htbp!]
-\caption{Compact Node Frontiers}
-\label{alg:compact_survivors}
-\begin{algorithmic}[1]
-\Require Candidate buffer $\beta$ of size $S$; binary survivor flags $\sigma[]$
-\Procedure{CompactSurvivors}{$\beta, \sigma$}
-\State $\rho_0 \gets 0$
-\For{$i = 1$ \textbf{to} $S$} \Comment{Parallel prefix sum on GPU}
-    \State $\rho_i \gets \rho_{i-1} + \sigma_{i-1}$
-\EndFor
-\ForAll{candidates $i = 0$ \textbf{to} $S-1$ \textbf{in parallel on GPU}} \Comment{One thread per candidate}
-    \If{$\sigma_i = 1$}
-        \State $\mathcal{Y}(v)[\,\rho_i\,] \gets \beta[i]$ \Comment{$v$: destination node of $i$}
-    \EndIf
-\EndFor
-\State \Return $\mathcal{Y}$
-\EndProcedure
-\end{algorithmic}
-\end{algorithm}
-
-
-
-\begin{algorithm}[htbp!]
-\caption{Materialize Cutset Products}
-\label{alg:materialize_cutset_products}
-\begin{algorithmic}[1]
-\Require Frontiers $\mathcal{Y}^{\downarrow}$, $\mathcal{Y}^{\uparrow}$; node offsets $\phi^{\downarrow}$, $\phi^{\uparrow}$ and sizes $\kappa^{\downarrow}$, $\kappa^{\uparrow}$ for nodes in batch $\mathcal{B}$; product offsets $\phi^p$
-\Procedure{MaterializeProducts}{$\mathcal{Y}^{\downarrow}, \mathcal{Y}^{\uparrow}, \mathcal{B}$}
-\State Allocate flat candidate buffer $\beta$ of size $\sum_{v \in \mathcal{B}} \kappa^{\downarrow}_v \cdot \kappa^{\uparrow}_v$
-\ForAll{nodes $v \in \mathcal{B}$ \textbf{in parallel on GPU}} \Comment{One thread block per node}
-    \State $T \gets \kappa^{\downarrow}_v \cdot \kappa^{\uparrow}_v$ \Comment{Total candidates for node $v$}
-    \ForAll{candidate indices $p = 0, \dots, T-1$ \textbf{in parallel}}
-        \State $i \gets \lfloor p / \kappa^{\uparrow}_v \rfloor$; \quad $j \gets p \pmod{\kappa^{\uparrow}_v}$
-        \State $y^{\downarrow} \gets \mathcal{Y}^{\downarrow}(\phi^{\downarrow}_v + i)$; \quad $y^{\uparrow} \gets \mathcal{Y}^{\uparrow}(\phi^{\uparrow}_v + j)$
-        \State $\beta[\,\phi^p_v + p\,] \gets y^{\downarrow} + y^{\uparrow}$
-    \EndFor
-\EndFor
-\State \Return $\beta$
-\EndProcedure
-\end{algorithmic}
-\end{algorithm}
+\Cref{alg:dynamic_1D_kernel} assigns $K_v=\lceil\Gamma_v/B\rceil$ blocks to node $v$, where $B$ is the number of threads per block. Each block owns at most $B$ candidate labels and compares them against the complete node segment in shared-memory tiles. Equal labels are resolved by retaining the earliest candidate. Once a thread finds that its label is dominated, it stops comparing but continues through the block barriers required by the remaining threads.
 
 \begin{algorithm}[t]
-\caption{Load-Balanced GPU Dominance Filter}
+\caption{Load-Balanced GPU Dominance Filtering}
 \label{alg:dynamic_1D_kernel}
 \begin{algorithmic}[1]
-\Require Flat candidate buffer $\beta$; per-node candidate counts $\Gamma[]$; block size $B$
-\Procedure{FilterDominated}{$\beta, \Gamma$}
-\State $K[v] \gets \lceil \Gamma[v] / B \rceil$ for all $v$
-\State $\phi^k_0 \gets 0$
-\For{$v = 1$ \textbf{to} $|\mathcal{L}_{j+1}|$ \textbf{in parallel on GPU}}
-    \State $\phi^k_v \gets \phi^k_{v-1} + K[v-1]$
-\EndFor
-\State $\sigma_i \gets 1$ for all candidates $i$
-\ForAll{thread blocks $q = 0, \dots, \sum_v K[v] - 1$ \textbf{in parallel on GPU}}
-    \State Binary search $\phi^k$ to find node $v$ s.t.\ $\phi^k_v \le q < \phi^k_{v{+}1}$
-    \State $\tau \gets q - \phi^k_v$ \Comment{Tile index within node $v$}
-    \State $[b,\, e) \gets$ candidate range of node $v$ in $\beta$
-    \State $i \gets b + \tau \cdot B + \text{thread index within block}$
-    \State \textbf{Load} $\mathbf{y}_i \gets \beta[i]$ into per-thread register (if $i < e$) \Comment{Reused across tiles}
-    \State $\mathit{dominated} \gets \mathbf{false}$
-    \For{tile start $s = b$ \textbf{to} $e{-}1$, \textbf{step} $B$}
-        \State \textbf{Barrier}: wait for all threads in block
-        \State Each thread $k$ loads $\beta[s{+}k]$ into \textbf{shared memory} slot $k$ \;(if $s{+}k < e$)
-        \State \textbf{Barrier}: ensure tile is fully visible
-        \If{$i < e$ \textbf{and not} $\mathit{dominated}$}
-            \For{$j = 0$ \textbf{to} $\min(B,\, e{-}s){-}1$, \textbf{skip} $j = i{-}b{-}\tau B$}
-                \If{shared[$j$] $\prec \mathbf{y}_i$}\; $\mathit{dominated} \gets \mathbf{true}$; \textbf{break} \EndIf
-            \EndFor \Comment{Early exit within tile}
+\Require Candidate buffer $\beta$; node-arc offsets $\phi^a$; candidate offsets $\phi^c$; node counts $\Gamma$; block size $B$
+\Procedure{FilterDominated}{$\beta,\phi^a,\phi^c,\Gamma,B$}
+    \State $K_v\gets\lceil\Gamma_v/B\rceil$ for all nodes $v$
+    \State $\phi^k\gets\Call{ExclusiveOffsets}{K}$
+    \State $\sigma_i\gets 0$ for all candidates $i$; $\eta_v\gets0$ for all nodes $v$
+    \ForAll{blocks $q=0,\dots,\sum_vK_v-1$ \textbf{in parallel on GPU}}
+        \State Find $v$ such that $\phi^k_v\le q<\phi^k_{v+1}$ by binary search
+        \State $\tau\gets q-\phi^k_v$ and $c_v\gets\phi^c_{\phi^a_v}$
+        \State $i_{\mathrm{loc}}\gets\tau B+\text{threadIdx}$
+        \If{$i_{\mathrm{loc}}<\Gamma_v$}
+            \State Load $\mathbf{y}_i\gets\beta[c_v+i_{\mathrm{loc}}]$ into a register
         \EndIf
-        \If{$\mathit{dominated}$} \textbf{break} \EndIf \Comment{Early exit across tiles}
+        \State $d_i\gets\mathbf{false}$
+        \For{$s=0,B,2B,\dots<\Gamma_v$}
+            \State Cooperatively load $\beta[c_v+s:c_v+s+B]$ into shared memory
+            \State \textbf{Barrier}: wait until the shared tile is visible
+            \If{$i_{\mathrm{loc}}<\Gamma_v$ and not $d_i$}
+                \For{$j=0,\dots,\min(B,\Gamma_v-s)-1$}
+                    \State $j_{\mathrm{loc}}\gets s+j$
+                    \If{$j_{\mathrm{loc}}\neq i_{\mathrm{loc}}$ and
+                    $\bigl(\text{shared}[j]\prec\mathbf{y}_i$ or
+                    $(\text{shared}[j]=\mathbf{y}_i$ and $j_{\mathrm{loc}}<i_{\mathrm{loc}})\bigr)$}
+                        \State $d_i\gets\mathbf{true}$; \textbf{break}
+                    \EndIf
+                \EndFor
+            \EndIf
+            \State \textbf{Barrier}: wait before overwriting the shared tile
+        \EndFor
+        \If{$i_{\mathrm{loc}}<\Gamma_v$}
+            \State $\sigma_{c_v+i_{\mathrm{loc}}}\gets\mathbb{I}[\neg d_i]$
+        \EndIf
+        \State Atomically add the block sum of $\sigma$ to $\eta_v$
     \EndFor
-    \If{$i < e$ \textbf{and} $\mathit{dominated}$}\; $\sigma_i \gets 0$ \EndIf
-\EndFor
-\State \Return $\sigma$
+    \State \Return $\sigma,\eta$
 \EndProcedure
 \end{algorithmic}
 \end{algorithm}
+
+The survivor flags preserve the node-segment order of the candidate buffer. Consequently, a global scan compacts the labels while an exclusive scan over the per-node survivor counts reconstructs the offsets of the next frontier.
+
+\begin{algorithm}[htbp!]
+\caption{Compact GPU Node Frontiers}
+\label{alg:compact_survivors}
+\begin{algorithmic}[1]
+\Require Candidate buffer $\beta$ of size $S$; survivor flags $\sigma$; optional per-node survivor counts $\eta$
+\Procedure{CompactSurvivors}{$\beta,\sigma[,\eta]$}
+    \State $\rho\gets\Call{ExclusiveOffsets}{\sigma}$
+    \Comment{$|\rho|=S+1$}
+    \If{$\eta$ is provided}
+        \State $\phi^y\gets\Call{ExclusiveOffsets}{\eta}$
+    \EndIf
+    \State Allocate $\mathcal{Y}^{\mathrm{next}}$ with $\rho_S$ labels
+    \ForAll{$i=0,\dots,S-1$ \textbf{in parallel on GPU}}
+        \If{$\sigma_i=1$}
+            \State $\mathcal{Y}^{\mathrm{next}}[\rho_i]\gets\beta[i]$
+        \EndIf
+    \EndFor
+    \If{$\eta$ is provided}
+        \State \Return $\phi^y,\mathcal{Y}^{\mathrm{next}}$
+    \EndIf
+    \State \Return $\mathcal{Y}^{\mathrm{next}}$
+\EndProcedure
+\end{algorithmic}
+\end{algorithm}
+
+During coupling, the top-down and bottom-up frontiers of a cutset node occupy the intervals given by $\phi^{\downarrow}$ and $\phi^{\uparrow}$. Let $\mathcal{F}^d=(\mathcal{Y}^d,\phi^d,\kappa^d)$ denote the flat frontier representation in direction $d$. \Cref{alg:materialize_cutset_products} assigns one block to each active node in the batch and distributes that node's Cartesian product across its threads. The product offsets $\phi^p$ assign disjoint output intervals to nodes.
+
+\begin{algorithm}[htbp!]
+\caption{Materialize GPU Cutset Products}
+\label{alg:materialize_cutset_products}
+\begin{algorithmic}[1]
+\Require Flat frontiers $\mathcal{F}^{\downarrow},\mathcal{F}^{\uparrow}$; batch $\mathcal{B}$; product offsets $\phi^p$; block size $B$
+\Procedure{MaterializeProducts}{$\mathcal{F}^{\downarrow},\mathcal{F}^{\uparrow},\mathcal{B},\phi^p$}
+    \State Allocate $\beta$ with $\phi^p_{|\mathcal{B}|}$ labels
+    \ForAll{nodes $v\in\mathcal{B}$ \textbf{in parallel on GPU}}
+        \Comment{One block per node}
+        \State $T_v\gets\kappa_v^{\downarrow}\kappa_v^{\uparrow}$
+        \ForAll{$p=\text{threadIdx},\text{threadIdx}+B,\dots<T_v$}
+            \State $i\gets\lfloor p/\kappa_v^{\uparrow}\rfloor$ and
+            $j\gets p\bmod\kappa_v^{\uparrow}$
+            \State $\mathbf{y}^{\downarrow}\gets
+            \mathcal{Y}^{\downarrow}[\phi_v^{\downarrow}+i]$ and
+            $\mathbf{y}^{\uparrow}\gets
+            \mathcal{Y}^{\uparrow}[\phi_v^{\uparrow}+j]$
+            \State $\beta[\phi^p_v+p]\gets
+            \mathbf{y}^{\downarrow}+\mathbf{y}^{\uparrow}$
+        \EndFor
+    \EndFor
+    \State \Return $\beta$
+\EndProcedure
+\end{algorithmic}
+\end{algorithm}
+\FloatBarrier
 
 
 \section{Additional Experimental Results}
 \label{app:additional_results}
-
-This appendix reports the full set of computational results summarized in \Cref{tab:combined_result_short}. The full MOKP, MOSPP, and MOTSP results are given in \Cref{tab:mokp_result,tab:mospp_result,tab:motsp_result}, respectively.
-
-The complete MOKP runtime comparison is shown in \Cref{tab:mokp_result}. The complete MOSPP runtime comparison is shown in \Cref{tab:mospp_result}.
+The full MOKP and MOSPP results are given in \Cref{tab:mokp_result,tab:mospp_result}, respectively. The results highlight that the trend is similar to the short version in \Cref{tab:combined_result_short}, with \textsc{PmddG} providing the best performance when the DD and intermediate frontiers fit in device memory, while \textsc{PmddC} is more robust under memory pressure. The MIP baseline is competitive on small instances but fails to scale to larger problems.
 
 \begin{table*}[t]
 \centering
