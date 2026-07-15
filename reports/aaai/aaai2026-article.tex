@@ -77,7 +77,7 @@ Decision diagrams (DDs) have recently emerged as an effective framework for sing
 
 \citet{bergman2016multiobjective} extended DDs to MODO, and \citet{bergman2022network} strengthened the framework with improved enumeration and state-based label pruning. PF enumeration nevertheless remains expensive. Each node stores the nondominated labels of the partial paths reaching it. Layer expansion generates labels along outgoing arcs, merges them into destination frontiers, and removes dominated candidates. This dominance filtering is the main computational bottleneck: in the worst case, every candidate at a node is compared with every other, and label sets grow rapidly with the number of objectives. Enumeration proceeds from both ends of the diagram, alternating between forward expansion from the root and backward expansion from the terminal. The two searches meet at a middle layer, the \emph{cutset}, where their frontiers are combined and filtered again. Existing DD-based MODO solvers perform these operations sequentially, one node and one comparison at a time.
 This paper investigates the parallelization of exact DD-based PF enumeration. 
-% Although parallelism has been studied for single-objective DD search~\citep{bergman2014parallel,perez2018parallel,tardivo2024cp,tardivo2026gpu}, PF enumeration exposes distinct opportunities for parallelism because it processes large sets of labels rather than a single scalar value. 
+% Although parallelism has been studied for single-objective DD search~\citep{bergman2014parallel,perez2018parallel,tardivo2024cp,tardivo2026complete}, PF enumeration exposes distinct opportunities for parallelism because it processes large sets of labels rather than a single scalar value. 
 % Computation can be parallelized across nodes during layer expansion, across labels during candidate generation and dominance filtering, and across nondominated sets during the final cutset merge. These levels of parallelism suit different architectures: multi-core CPUs support node-level work sharing and tree-based frontier reduction, while GPUs exploit finer-grained parallelism through flat candidate buffers and data-parallel filtering kernels.
 
 
@@ -510,7 +510,6 @@ The candidate-then-filter ordering distinguishes the GPU backend from the CPU ba
 
 We evaluate \textsc{Pmdd} by addressing three research questions. \textbf{RQ1:} How does exact serial DD-based enumeration \textsc{Smdd} compare with the MIP-based defining-point algorithm DPA in runtime and robustness? \textbf{RQ2:} To what extent does CPU parallelization in \textsc{PmddC} reduce enumeration time relative to \textsc{Smdd}, and how does its performance scale with the number of threads? \textbf{RQ3:} Under what conditions does the GPU variant \textsc{PmddG} outperform \textsc{PmddC}, and how does GPU memory affect its robustness?
 
-% Our experimental setup and results are provided in \Cref{sec:setup} and \Cref{sec:results}, respectively. 
 \subsection{Computational Setup}
 \label{sec:setup}
 
@@ -609,172 +608,36 @@ $n$ & $m$ & Method & Time (s) & Speedup & $S^{(M,T)}$ \\
 \end{table*}
 
 
-% \section{Computational Experiments}
-% \label{sec:results}
-% Our computational evaluation aims to answer the following key research questions:
-% \begin{list}{\textbf{RQ\arabic{enumi}}}{%
-%     \usecounter{enumi}
-%     \setlength{\labelwidth}{2.5em}
-%     \setlength{\labelsep}{0.5em}
-%     \setlength{\leftmargin}{3.0em}
-%     \setlength{\itemsep}{0.25em}
-%     \setlength{\parsep}{0pt}
-% }
-%     \item \textbf{MIP vs. Serial DD:} How does serial DD-based Pareto frontier enumeration compare with MIP baselines in runtime and scalability?
-%     \item \textbf{Serial DD vs. \textsc{PmddC}:} How much speedup does the parallel CPU DD implementation provide over serial DD?
-%     \item \textbf{\textsc{PmddC} vs. \textsc{PmddG}:} How does the GPU DD implementation compare with the parallel CPU DD variant in runtime and robustness?
-% \end{list}
-
-% \subsection{Experimental Setup}
-% We conducted all experiments on a compute cluster equipped with an Intel Xeon 6972P CPU running at 2.4\,GHz and an NVIDIA H100 GPU. Across all experiments, the CPU memory limit was set to 16\,GB and the GPU memory limit was set to 20\,GB, with a one-hour time limit per instance. Our parallel PF enumeration algorithms were implemented on top of the C++ code of \citet{bergman2022network}. Specifically, we used C++14 with OpenMP 4.5 for CPU parallelism and NVCC 12.6 for GPU acceleration.
-
-% We evaluate the proposed methods on MOKP, MOSPP, and MOTSP. The test instances are taken from \citet{bergman2022network}. We report results for instance sizes on which their best method, namely bidirectional PF enumeration (reported as \texttt{Coup} or \texttt{Coup}$^+$), required at least 5 seconds of total runtime. For each instance size, the test set contains 10 instances.
-
-% \citet{bergman2022network} showed that serial bidirectional PF enumeration (\texttt{Coup}/\texttt{Coup}$^+$) outperforms the two prior criterion-space algorithms it was benchmarked against, \citet{kirlik2014new} and \citet{ozlen2014multi}. \citet{dachert2024simple} subsequently showed that their MIP-based defining point algorithm (DPA) outperforms both of these same methods, plus a third criterion-space baseline \citep{boland2017dcm}. Neither paper compares directly against the other's paradigm, so we benchmark our DD-based methods directly against DPA, rather than against the methods it has already superseded, to test whether DD-based enumeration remains competitive with the strongest available MIP-based approach. We denote the serial bidirectional PF enumeration method of \citet{bergman2022network} by \text{Coup} or \text{Coup}$^+$. The ``+'' suffix indicates that state-dominance-based label pruning is used in addition to bidirectional PF enumeration. To ensure a fair comparison, we use the implementation provided by \citet{bergman2022network}, rather than our modified implementation, which can also perform serial PF enumeration. We refer to the two variants of DPA as DPA-A and DPA-TS.
-
-% The CPU bidirectional PF enumeration variants are reported as \texttt{Coup-T} (or $\texttt{Coup}^+\texttt{-T}$), where \texttt{T} specifies the number of parallel threads. The GPU bidirectional PF enumeration variants are reported as \texttt{G-Coup} and \texttt{G-Coup}$^+$. We report the enumeration wall-clock time in seconds (``Time (s)''), the speed-up w.r.t.\ \texttt{Coup} or \texttt{Coup}$^+$, and the tuple ``(M, T)'', which gives the number of instances that failed due to out-of-memory errors (M) and time-out limits (T).
-
-% \subsection{Results}
-% \paragraph{RQ1 (MIP vs. Serial DD).}
-% \Cref{tab:combined_result_short} shows that serial DD enumeration is substantially more robust than the DPA baselines on MOKP and MOTSP. On MOKP, DPA solves only two instances for $(N,K)=(40,6)$ and none of the remaining reported settings, whereas \texttt{Coup} solves all instances for $N=40$ and remains competitive on the larger $N=70$ settings. On MOTSP, both DPA variants time out on all reported settings, while \texttt{Coup} solves all instances for $K=4,5$, nine instances for $K=6$, and one instance for $K=7$. The MOSPP results are more mixed: DPA-A is faster than \texttt{Coup} for $(150,3)$ and $(200,3)$, and solves all instances where \texttt{Coup} encounters memory failures for $N=200$; however, DPA fails on the high-objective $(150,7)$ setting where \texttt{Coup} solves all instances. This crossover follows from how each method's cost scales. DPA solves for each nondominated point individually, so its cost scales with frontier cardinality, and MOSPP's frontier stays small at low $K$, exactly where DPA-A is fastest. DD-based enumeration instead scales with the size of the underlying state space and the intermediate labels it carries through that space. MOSPP's state space is large even at low $K$, so it generates far more intermediate labels than its small final frontier would suggest, which is what makes low-$K$ MOSPP comparatively hard for DD-based enumeration. As $K$ grows, this reverses, since the frontier itself grows large enough that solving one MIP per point becomes DPA's bottleneck, while DD-based enumeration continues to benefit from sharing structure across the state space. The two families thus fail in complementary regimes, trading off which quantity, state-space size or frontier cardinality, becomes the bottleneck as the number of objectives grows. This confirms that DD-based enumeration remains competitive with the strongest available MIP baseline, not merely with the older methods it has already superseded.
-
-% \paragraph{RQ2 (Serial DD vs. Parallel DD on CPU).}
-% The CPU variants provide consistent but bounded speedups over serial DD enumeration. On MOKP, the best CPU speedups range from $1.80\times$ to $3.21\times$, with weaker scaling on the larger $N=70$ cases. On MOSPP, CPU speedups range from about $1.51\times$ on the easiest setting to $4.12\times$ for $(200,4)$. MOTSP benefits most from CPU parallelism: \texttt{Coup-16} reaches $7.83\times$ for $K=4$ and $5.05\times$ for $K=5$, while still improving over serial enumeration for $K=6,7$. The CPU variants also improve robustness in several harder settings, solving more instances than serial \texttt{Coup} on large MOKP and MOTSP cases.
-
-% \paragraph{RQ3 (Parallel DD on CPU vs. GPU).}
-% The GPU variants are often fastest when the intermediate frontiers fit in GPU memory, but they are less robust than the CPU variants. On MOKP, GPU methods dominate the small $N=40$ settings, with \texttt{G-Coup} reaching $5.51\times$ and $9.71\times$ speedups; for $N=70$, \texttt{G-TD} is fastest on solved instances but incurs GPU out-of-memory failures. On MOSPP, GPU performance is strong for $N=150$, including a $20.88\times$ speedup for \texttt{G-TD} at $(150,7)$, but both GPU variants fail due to memory on the reported $N=200$ settings. On MOTSP, GPU methods are competitive with or faster than the CPU variants, especially for $K=5,6$, but memory failures appear for \texttt{G-TD} at higher $K$ and for \texttt{G-Coup} at $K=7$. Overall, the GPU gives the largest speedups, while the parallel CPU variants are more reliable under the imposed memory limits. This gap in robustness follows partly from how the two implementations are structured: the GPU bounds each layer's candidate materialization to a fixed-size batch of nodes, applying dominance filtering between batches so that many candidates are discarded before the rest of the layer is expanded, but it also keeps separate flattened device-side representations for top-down and bottom-up traversal, which doubles its baseline GPU memory footprint before enumeration even starts. The CPU's node-owned frontier degrades more gracefully, since a large node increases one worker's execution time instead of exhausting a memory pool shared by all workers. Full tables for all reported instance sizes are provided in \Cref{app:additional_results}.
-
-% \begin{table*}[htbp!]
-% \centering
-% \scriptsize
-% \renewcommand{\arraystretch}{0.97}
-% \caption{Pareto Enumeration Runtime Comparison Across Problems and Enumeration Methods}
-% \resizebox{\textwidth}{!}{%
-% \begin{tabular}{lrrlrrllrrlrrl}
-% \toprule
-% Problem & N & K & Method & Time (s) & Speed-up & $S^{(M,T)}$ &
-% N & K & Method & Time (s) & Speed-up & $S^{(M,T)}$ \\
-% \midrule
-% \multirow{16}{*}{MOKP} & \multirow{8}{*}{40} & \multirow{8}{*}{6} & DPA-TS & 1371 & 0.01$\times$ & $2^{(0, 8)}$ & \multirow{8}{*}{40} & \multirow{8}{*}{7} & DPA-TS & -- & -- & $0^{(0, 10)}$ \\
-%  &  &  & DPA-A & 1439 & 0.01$\times$ & $2^{(0, 8)}$ &  &  & DPA-A & -- & -- & $0^{(0, 10)}$ \\
-%  &  &  & Coup & 10 & 1.00$\times$ & $10$ &  &  & Coup & 33 & 1.00$\times$ & $10$ \\
-%  &  &  & \texttt{Coup-4} & 6 & 1.87$\times$ & $10$ &  &  & \texttt{Coup-4} & 16 & 2.12$\times$ & $10$ \\
-%  &  &  & \texttt{Coup-8} & 5 & 2.15$\times$ & $10$ &  &  & \texttt{Coup-8} & 13 & 2.63$\times$ & $10$ \\
-%  &  &  & \texttt{Coup-16} & 4 & 2.60$\times$ & $10$ &  &  & \texttt{Coup-16} & 11 & 3.21$\times$ & $10$ \\
-%  &  &  & \texttt{G-TD} & 3 & 4.31$\times$ & $10$ &  &  & \texttt{G-TD} & 5 & 7.12$\times$ & $10$ \\
-%  &  &  & \texttt{G-Coup} & \textbf{2} & 5.51$\times$ & $10$ &  &  & \texttt{G-Coup} & \textbf{4} & 9.71$\times$ & $10$ \\
-% \cmidrule(lr){2-13}
-%  & \multirow{8}{*}{70} & \multirow{8}{*}{6} & DPA-TS & -- & -- & $0^{(0, 10)}$ & \multirow{8}{*}{70} & \multirow{8}{*}{7} & DPA-TS & -- & -- & $0^{(0, 10)}$ \\
-%  &  &  & DPA-A & -- & -- & $0^{(0, 10)}$ &  &  & DPA-A & -- & -- & $0^{(0, 10)}$ \\
-%  &  &  & Coup & 1549 & 1.00$\times$ & $5^{(0, 5)}$ &  &  & Coup & 1650 & 1.00$\times$ & $3^{(0, 7)}$ \\
-%  &  &  & \texttt{Coup-4} & 1326 & 1.17$\times$ & $7^{(0, 3)}$ &  &  & \texttt{Coup-4} & 1391 & 1.19$\times$ & $4^{(0, 6)}$ \\
-%  &  &  & \texttt{Coup-8} & 1008 & 1.54$\times$ & $7^{(0, 3)}$ &  &  & \texttt{Coup-8} & 1757 & 0.94$\times$ & $6^{(0, 4)}$ \\
-%  &  &  & \texttt{Coup-16} & 862 & 1.80$\times$ & $7^{(0, 3)}$ &  &  & \texttt{Coup-16} & 1708 & 0.97$\times$ & $7^{(0, 3)}$ \\
-%  &  &  & \texttt{G-TD} & \textbf{335} & 4.63$\times$ & $6^{(4, 0)}$ &  &  & \texttt{G-TD} & \textbf{372} & 4.44$\times$ & $3^{(7, 0)}$ \\
-%  &  &  & \texttt{G-Coup} & 1010 & 1.53$\times$ & $10$ &  &  & \texttt{G-Coup} & 907 & 1.82$\times$ & $6^{(3, 1)}$ \\
-% \midrule
-% \multirow{16}{*}{MOSPP} & \multirow{8}{*}{150} & \multirow{8}{*}{3} & DPA-TS & 11 & 1.12$\times$ & $10$ & \multirow{8}{*}{150} & \multirow{8}{*}{7} & DPA-TS & -- & -- & $0^{(0, 10)}$ \\
-%  &  &  & DPA-A & 8 & 1.59$\times$ & $10$ &  &  & DPA-A & -- & -- & $0^{(0, 10)}$ \\
-%  &  &  & Coup & 12 & 1.00$\times$ & $10$ &  &  & Coup & 184 & 1.00$\times$ & $10$ \\
-%  &  &  & \texttt{Coup-4} & 8 & 1.50$\times$ & $10$ &  &  & \texttt{Coup-4} & 84 & 2.20$\times$ & $10$ \\
-%  &  &  & \texttt{Coup-8} & 8 & 1.50$\times$ & $10$ &  &  & \texttt{Coup-8} & 71 & 2.61$\times$ & $10$ \\
-%  &  &  & \texttt{Coup-16} & 8 & 1.51$\times$ & $10$ &  &  & \texttt{Coup-16} & 96 & 1.91$\times$ & $10$  \\
-%  &  &  & \texttt{G-TD} & 7 & 1.80$\times$ & $10$ &  &  & \texttt{G-TD} & \textbf{9} & 20.88$\times$ & $10$  \\
-%  &  &  & \texttt{G-Coup} & \textbf{5} & 2.44$\times$ & $9^{(1, 0)}$ &  &  & \texttt{G-Coup} & 17 & 10.98$\times$ & $10$ \\
-% \cmidrule(lr){2-13}
-%  & \multirow{8}{*}{200} & \multirow{8}{*}{3} & DPA-TS & 32 & 5.15$\times$ & $10$ & \multirow{8}{*}{200} & \multirow{8}{*}{4} & DPA-TS & 913 & 0.20$\times$ & $10$\\
-%  &  &  & DPA-A & \textbf{22} & 7.53$\times$ & $10$ &  &  & DPA-A & 793 & 0.23$\times$ & $10$\\
-%  &  &  & Coup & 162 & 1.00$\times$ & $1^{(9, 0)}$  &  &  & Coup & 186 & 1.00$\times$ & $1^{(9, 0)}$ \\
-%  &  &  & \texttt{Coup-4} & 93 & 1.75$\times$ & $1^{(9, 0)}$ &  &  & \texttt{Coup-4} & 80 & 2.34$\times$ & $1^{(9, 0)}$\\
-%  &  &  & \texttt{Coup-8} & 87 & 1.86$\times$ & $1^{(9, 0)}$  &  &  & \texttt{Coup-8} & 63 & 2.97$\times$ & $1^{(9, 0)}$\\
-%  &  &  & \texttt{Coup-16} & 72 & 2.27$\times$ & $1^{(8, 1)}$ &  &  &\texttt{Coup-16} & \textbf{45} & 4.12$\times$ & $1^{(9, 0)}$\\
-%  &  &  & \texttt{G-TD} & -- & -- & $0^{(10, 0)}$  &  &  & \texttt{G-TD} & -- & -- & $0^{(10, 0)}$\\
-%  &  &  & \texttt{G-Coup} & -- & -- & $0^{(10, 0)}$  & &  & \texttt{G-Coup} & -- & -- & $0^{(10, 0)}$\\
-% \midrule
-% \multirow{16}{*}{MOTSP} & \multirow{8}{*}{15} & \multirow{8}{*}{4} & DPA-TS & -- & -- & $0^{(0, 10)}$ & \multirow{8}{*}{15} & \multirow{8}{*}{5} & DPA-TS & -- & -- & $0^{(0, 10)}$ \\
-%  &  &  & DPA-A & -- & -- & $0^{(0, 10)}$ &  &  & DPA-A & -- & -- & $0^{(0, 10)}$ \\
-%  &  &  & Coup & 23 & 1.00$\times$ & $10$ &  &  & Coup & 335 & 1.00$\times$ & $10$ \\
-%  &  &  & \texttt{Coup-4} & 7 & 3.47$\times$ & $10$ &  &  & \texttt{Coup-4} & 115 & 2.92$\times$ & $10$ \\
-%  &  &  & \texttt{Coup-8} & 5 & 5.06$\times$ & $10$ &  &  & \texttt{Coup-8} & 82 & 4.11$\times$ & $10$ \\
-%  &  &  & \texttt{Coup-16} & 3 & 7.83$\times$ & $10$ &  &  & \texttt{Coup-16} & 67 & 5.05$\times$ & $10$ \\
-%  &  &  & \texttt{G-TD} & 3 & 7.50$\times$ & $10$ &  &  & \texttt{G-TD} & \textbf{36} & 9.44$\times$ & $9^{(1, 0)}$ \\
-%  &  &  & \texttt{G-Coup} & \textbf{3} & 8.03$\times$ & $10$ &  &  & \texttt{G-Coup} & 48 & 7.04$\times$ & $10$ \\
-% \cmidrule(lr){2-13}
-%  & \multirow{8}{*}{15} & \multirow{8}{*}{6} & DPA-TS & -- & -- & $0^{(0, 10)}$ & \multirow{8}{*}{15} & \multirow{8}{*}{7} & DPA-TS & -- & -- & $0^{(0, 10)}$ \\
-%  &  &  & DPA-A & -- & -- & $0^{(0, 10)}$ &  &  & DPA-A & -- & -- & $0^{(0, 10)}$ \\
-%  &  &  & Coup & 1623 & 1.00$\times$ & $9^{(0, 1)}$ &  &  & Coup & 3544 & 1.00$\times$ & $1^{(0, 9)}$ \\
-%  &  &  & \texttt{Coup-4} & 870 & 1.87$\times$ & $10$ &  &  & \texttt{Coup-4} & 2508 & 1.41$\times$ & $3^{(0, 7)}$ \\
-%  &  &  & \texttt{Coup-8} & 711 & 2.28$\times$ & $10$ &  &  & \texttt{Coup-8} & 2123 & 1.67$\times$ & $3^{(0, 7)}$ \\
-%  &  &  & \texttt{Coup-16} & 641 & 2.53$\times$ & $10$ &  &  & \texttt{Coup-16} & 1930 & 1.84$\times$ & $3^{(0, 7)}$ \\
-%  &  &  & \texttt{G-TD} & -- & -- & $0^{(10, 0)}$ &  &  & \texttt{G-TD} & -- & -- & $0^{(10, 0)}$ \\
-%  &  &  & \texttt{G-Coup} & \textbf{369} & 4.40$\times$ & $10$ &  &  & \texttt{G-Coup} & \textbf{1828} & 1.94$\times$ & $6^{(3, 1)}$ \\
-% \bottomrule
-% \end{tabular}
-% }
-% \label{tab:combined_result_short}
-% \end{table*}
-
 \section{Related Work}
 \label{sec:related}
-% We position our contribution against two strands of prior work. The first, exact algorithms for multiobjective discrete optimization, supplies the enumeration model on which DD-based Pareto frontier construction is built; the second, parallel computing for discrete optimization, addresses how the computational kernels of exact solvers are accelerated on multi-core and many-core hardware. We review each in turn before situating our contribution relative to both.
-
-% Our work builds on the advances in the field of exact MODO and parallel discrete optimization. Exact multiobjective methods provide the DD-based framework used here to enumerate Pareto frontiers. Parallel discrete optimization studies how the computationally expensive operations of exact solvers can be distributed across multicore CPUs and GPUs. We review both areas below and explain how our approach connects them.
-
-% \subsection{Exact Multiobjective Discrete Optimization}
-% \label{sec:related_exact}
-% Exact algorithms for multiobjective discrete optimization are commonly divided into criterion-space, decision-space, and dynamic-programming or state-space approaches; see \citet{ehrgott2016exact,halffmann2022exact} for surveys. Criterion-space methods enumerate nondominated points by repeatedly solving scalarized or constrained single-objective subproblems while partitioning the unexplored objective space. Representative examples include recursive and box-decomposition schemes \citep{ozlen2009multi,ozlen2014multi,boland2015criterion}, parameter-space search \citep{kirlik2014new}, and recent objective-space algorithms for multiobjective integer programming \citep{dachert2024simple,tamby2021enumeration}. Decision-space methods instead generalize branch-and-bound or branch-and-cut to vector-valued bounds and dominance-based fathoming.
-
-% Dynamic-programming and state-space methods propagate sets of nondominated labels through a recursive model. Decision diagrams belong to this family. \citet{bergman2016multiobjective} introduced multiobjective optimization by DDs, and \citet{bergman2022network} developed network models and reduction operations that make exact Pareto frontier enumeration competitive when a compact DD representation is available. Our work builds on this DD-based state-space approach. We do not change the exact enumeration model; instead, we parallelize its dominant operations: label generation, dominance filtering, cutset-product materialization, and frontier merging.
-
-% \revE{The Pareto constraint literature \citep{hartert2014pareto,malalel2023mdd} uses an MDD as a compact archive of previously found nondominated solutions, maintained during CP search: at each search-tree node it filters the objective-variable domains and is updated with any newly found solution. Our MDD instead encodes the state space of the problem's dynamic-programming formulation --- each node is a feasible state, not a solution or archive entry --- and once the diagram is built, enumeration attaches a node frontier (the nondominated partial-solution vectors reaching that state) to each node and propagates these to recover the exact frontier. This is also why our process has no incrementality in the CP sense: there is no variable domain being filtered during search, since we operate on the complete state-space diagram rather than a growing search tree.}
+We position \textsc{Pmdd} at the intersection of exact MODO and parallel discrete optimization. We first review how exact methods organize PF enumeration, and then distinguish our approach from methods that parallelize search, DD construction, or operations on the DD structure itself.
 
 \subsection{Exact Multiobjective Discrete Optimization}
 \label{sec:related_exact}
-Exact MODO algorithms can be classified according to whether they organize the search in criterion space, decision space, or a DP state space \citep{ehrgott2016exact,halffmann2022exact}. Criterion-space methods partition the unexplored objective region and solve a sequence of scalarized or constrained single-objective subproblems. This class includes recursive and box-decomposition methods \citep{ozlen2009multi,ozlen2014multi,boland2015criterion}, parameter-space search \citep{kirlik2014new}, and more recent objective-space algorithms for multiobjective integer programming \citep{tamby2021enumeration,dachert2024simple}.
+Exact MODO algorithms can be classified by whether they organize enumeration in criterion space, decision space, or a DP state space \citep{ehrgott2016exact,halffmann2022exact}. Criterion-space methods partition the unexplored objective region and solve a sequence of scalarized or constrained single-objective subproblems. Representative approaches include recursive and box-decomposition methods \citep{ozlen2009multi,ozlen2014multi,boland2015criterion}, parameter-space search \citep{kirlik2014new}, and more recent objective-space algorithms for multiobjective integer programming \citep{tamby2021enumeration,dachert2024simple}.
 
-Decision-space methods retain a branch-and-bound or branch-and-cut tree over the original decision variables. Early algorithms adapted integer-programming enumeration to identify efficient solutions \citep{klein1982algorithm,kiziltan1983algorithm}. More recent biobjective methods replace scalar node bounds with vector-valued bound sets and compare them against the incumbent PF. Research in this area has developed stronger bound sets and fathoming tests, problem-independent branching rules, presolve techniques, and hybrid strategies that also branch in objective space \citep{stidsen2014branch,parragh2019branch,adelgren2022branch}. These methods avoid an explicit partition of the entire objective space, but their effectiveness depends on the strength and computational cost of the bound sets computed throughout the search tree.
+Decision-space methods instead retain a branch-and-bound or branch-and-cut tree over the original decision variables. Early algorithms adapted integer-programming enumeration to identify efficient solutions \citep{klein1982algorithm,kiziltan1983algorithm}. More recent biobjective methods replace scalar node bounds with vector-valued bound sets that are compared against the incumbent PF. This line of work has developed stronger bound sets and fathoming tests, problem-independent branching rules, presolve techniques, and hybrid strategies that also branch in objective space \citep{stidsen2014branch,parragh2019branch,adelgren2022branch}. These methods avoid explicitly partitioning the entire objective space, but their performance depends on the strength and computational cost of the bound sets computed throughout the search tree.
 
-State-space methods use a DP network rather than a branch-and-bound tree. The DD framework used in this paper follows \citet{bergman2016multiobjective,bergman2022network} and is summarized in \Cref{sec:prelim_dd}. Our contribution leaves the underlying exact DD model unchanged and parallelizes the operations used to enumerate its PF. DDs have also been used in constraint programming for a different purpose. The Pareto constraint maintains an archive of
-nondominated solutions found during tree search and uses it to filter the objective-variable domains \citep{hartert2014pareto}.
-\citet{malalel2023mdd} encode this archive as an MDD to accelerate its update and filtering operations. In our setting, the DD
-represents the DP state space, and its node frontiers contain nondominated vectors associated with partial paths. The archive is
-therefore updated incrementally during constraint-programming search, whereas our method propagates labels over a fixed state-
-space DD to recover the PF.
+State-space methods represent the underlying DP recursion as a network rather than searching a branch-and-bound tree. The exact DD framework adopted in this paper follows \citet{bergman2016multiobjective,bergman2022network} and is summarized in \Cref{sec:prelim_dd}. We retain this representation and its enumeration semantics, but parallelize the label operations used to recover the PF.
+
+DDs have also been used for a different purpose in constraint programming. The Pareto constraint maintains an archive of nondominated solutions discovered during tree search and uses this archive to filter the domains of the objective variables \citep{hartert2014pareto}. \citet{malalel2023mdd} encode the archive as an MDD to accelerate its update and filtering operations. In our setting, by contrast, the DD represents the fixed DP state space, and each node frontier contains the nondominated objective vectors of partial paths through that state. Thus, the constraint-programming MDD is an incrementally updated solution archive, whereas our method propagates labels over a fixed state-space DD to recover the PF.
 
 
 \subsection{Parallel Computing for Discrete Optimization}
 
-Parallel exact optimization has traditionally focused on branch-and-bound, where nodes or subtrees are distributed across workers \citep{kindervater1986introduction,gendron1994parallel,ralphs2003parallel,linderoth2003decomposition}. Its performance depends on balancing the search workload while limiting communication and synchronization. Parallel execution can also change the order in which incumbents and bounds are discovered, sometimes increasing the total amount of search \citep{lai1984anomalies}. Parallelism has also been explored within DD-based optimization. \citet{bergman2014parallel} distribute subproblems generated by an exact branch-and-bound framework based on approximate DDs, while \citet{perez2018parallel} parallelize reduction and set operations that manipulate the structure of an MDD. In contrast, \textsc{PmddC} operates on an already constructed exact DD. It distributes node-frontier expansion across CPU threads and combines the resulting cutset frontiers through a parallel reduction.
+Parallel exact optimization has traditionally focused on branch-and-bound, where nodes or subtrees are distributed across workers \citep{kindervater1986introduction,gendron1994parallel,ralphs2003parallel,linderoth2003decomposition}. Effective parallelization requires balancing this irregular workload while limiting communication and synchronization. Moreover, parallel execution can change when incumbents and bounds are discovered and may therefore increase the total amount of search \citep{lai1984anomalies}. Parallelism has also been studied in DD-based optimization. \citet{bergman2014parallel} distribute subproblems generated by an exact branch-and-bound framework based on approximate DDs, while \citet{perez2018parallel} parallelize reduction and set operations that modify the structure of an MDD. In contrast, \textsc{PmddC} operates on an already constructed exact DD and parallelizes node-frontier expansion and the reduction of cutset frontiers.
 
+GPUs have been used to accelerate simplex and interior-point computations \citep{lalami2011gpu,ploskas2016gpu,shin2025madipm}, while GPU-native first-order methods have shown strong performance on large linear programs \citep{applegate2021practical,lu2025cupdlp,lu2023cupdlpc,lu2025cupdlpx}. Extending GPU acceleration to mixed-integer optimization is more difficult because branch-and-bound produces irregular, dynamically changing workloads. Existing work has therefore focused on accelerating selected optimization kernels and problem-specific algorithms on the GPU \citep{boyer2017gpu}. More recently, \citet{ccorduk2025gpu} developed GPU-accelerated primal heuristics for MIP, including Feasibility Pump, Feasibility Jump, and Fix-and-Propagate.
 
-GPUs have been used to accelerate simplex and interior-point computations \citep{lalami2011gpu,ploskas2016gpu,shin2025madipm}, and GPU-native first-order methods have shown strong performance on large linear programs \citep{applegate2021practical,lu2025cupdlp,lu2023cupdlpc,lu2025cupdlpx}. GPU acceleration is more difficult for mixed-integer optimization because branch-and-bound produces irregular and dynamically changing workloads. Existing work has therefore focused largely on selected solver components and primal heuristics \citep{boyer2017gpu,ccorduk2025gpu}. More closely related to our work, \citet{tardivo2026gpu} accelerate state expansion during anytime exact DD search, including successor generation, state dominance filtering, and duplicate elimination. Their method uses the GPU while constructing and exploring DD fragments. \textsc{PmddG}, by contrast, assumes that the exact DD has already been constructed and parallelizes the subsequent PF enumeration. It flattens the DD and its node frontiers into arrays that support batched candidate generation, dominance filtering, and frontier reduction. Thus, both methods exploit the layered structure of DDs, but they parallelize different stages and process different objects. \citet{tardivo2026gpu} process DP states during DD construction and search, whereas \textsc{PmddG} processes objective labels during PF
-enumeration.
-
-% Parallel exact optimization has historically focused on branch-and-bound. Nodes or subtrees can be assigned to different workers, allowing large portions of the search tree to be explored concurrently \citep{kindervater1986introduction,gendron1994parallel,ralphs2003parallel,linderoth2003decomposition}. The effectiveness of this strategy depends on balancing the search workload while limiting communication and synchronization. Parallel execution can also change the order in which incumbents and bounds are discovered, sometimes increasing the total amount of search required \citep{lai1984anomalies}.
-
-% DDs have enabled several other forms of parallelism. \citet{bergman2014parallel} distribute the subproblems of an exact branch-and-bound search based on recursively constructed approximate DDs. \citet{perez2018parallel} instead parallelize reduction, union, intersection, and difference operations that manipulate the structure of an MDD. More recently, \citet{tardivo2026gpu} use the GPU to accelerate state expansion during exact anytime DD search, including successor generation, dominance filtering, and duplicate elimination. These approaches parallelize the search process, operations on the diagram, or the construction of the diagram itself. Our method assumes that an exact DD is already available and parallelizes the label propagation, dominance filtering, and cutset coupling required to enumerate its PF.
-
-% GPUs have also been applied more broadly in mathematical optimization. Prior work has accelerated simplex and interior-point computations \citep{lalami2011gpu,ploskas2016gpu,shin2025madipm}, while GPU-native first-order methods have enabled efficient solution of large linear programs \citep{applegate2021practical,lu2025cupdlp,lu2023cupdlpc,lu2025cupdlpx}. Extending this success to mixed-integer optimization is more difficult because branch-and-bound produces irregular and dynamically changing workloads. Existing work has therefore focused largely on selected solver components and primal heuristics \citep{boyer2017gpu,ccorduk2025gpu}. In DD-based PF enumeration, the labels generated within each layer can be flattened into large batches of objective vectors. This exposes fine-grained parallelism in candidate generation, dominance testing, and frontier reduction without transferring search-tree control to the GPU.
-
-
-% Parallel computing has long been used to accelerate exact discrete optimization \citep{kindervater1986introduction}. Much of the classical work focuses on branch-and-bound, where parallelism comes from distributing search-tree nodes across processors \citep{gendron1994parallel,ralphs2003parallel,linderoth2003decomposition}. Such methods can scale well when the tree is effectively partitioned, but they also exhibit search-order effects such as the parallel branch-and-bound anomalies studied by \citet{lai1984anomalies}. Parallelism has also been studied in DD-based optimization: \citet{bergman2014parallel} proposed a parallel DD-based branch-and-bound framework that distributes DD node exploration across processors. \revE{A different strand of work parallelizes the classical MDD algebra directly rather than the search process: \citet{perez2018parallel} propose \texttt{pReduce} for parallel MDD reduction and parallel Apply-style union, intersection, and difference operators that preserve the MDD structure throughout. Our approach differs in kind --- rather than parallelizing structure-preserving MDD operations, we parallelize label propagation and dominance filtering for Pareto-frontier enumeration, discarding the MDD structure as we go.}
-
-% More recent work has explored accelerator hardware. GPU implementations have been proposed for parts of simplex and linear-programming solvers \citep{lalami2011gpu,ploskas2016gpu,shin2025madipm}, and GPU-native first-order methods have shown strong performance on large-scale linear programs \citep{applegate2021practical,lu2025cupdlp,lu2023cupdlpc,lu2025cupdlpx}. For mixed-integer programming, GPU acceleration is harder because search trees are irregular; existing approaches typically keep the tree control on the CPU and offload selected kernels or heuristics to the GPU \citep{boyer2017gpu,ccorduk2025gpu}. Closest to our setting is the GPU-accelerated state expansion framework for anytime exact DD search of \citet{tardivo2026gpu}. In contrast, we study exact Pareto frontier enumeration on DDs, where the main parallel kernels are not tree-node relaxations but label generation, pairwise dominance filtering, and nondominated-set reduction.
+Closest to our setting, \citet{tardivo2026complete,tardivo2026gpu} accelerate DD construction on GPUs. The former parallelizes state expansion over fragments in complete anytime DD search; the latter uses the GPU to compile relaxed DDs within branch-and-bound while CPU threads construct restricted DDs. Both operate on DP states and parallelize construction primitives such as successor generation and dominance filtering. In contrast, \textsc{PmddG} starts from an already constructed exact DD and parallelizes objective-label propagation and dominance filtering during PF enumeration. Their methods therefore accelerate DD construction and search, whereas ours accelerates post-construction multiobjective enumeration.
 
 \section{Conclusion and Future Work}
 \label{sec:conclusion}
-This paper introduced \textsc{Pmdd}, parallel CPU and GPU implementations of exact bidirectional PF enumeration on DDs. \textsc{PmddC} distributes node-frontier expansion across CPU threads and combines cutset frontiers through a parallel reduction, while \textsc{PmddG} parallelizes candidate generation, dominance filtering, and frontier reduction at a finer granularity. Experiments on MOKP, MOSPP, and MOTSP showed that DD-based enumeration is more robust than the MIP baseline on MOKP and MOTSP, while the MIP approach remains competitive on large, low-objective MOSPP instances. 
-% Relative to \textsc{Smdd}, the CPU and GPU variants achieved speedups of up to $7.83\times$ and $20.88\times$, respectively. 
-The GPU provides the strongest performance when the DD and intermediate frontiers fit in device memory, whereas the CPU remains more reliable under memory pressure.
+This paper introduced \textsc{Pmdd}, a parallel framework for exact bidirectional PF enumeration on DDs. Its CPU implementation, \textsc{PmddC}, distributes node-frontier expansion across threads and combines cutset frontiers through a parallel reduction. Its GPU implementation, \textsc{PmddG}, exposes finer-grained parallelism in candidate generation, dominance filtering, and frontier reduction. Experiments on MOKP, MOSPP, and MOTSP show that DD-based enumeration is more robust than the MIP baseline on MOKP and MOTSP, while the MIP approach remains competitive on large MOSPP instances with few objectives. Among the parallel variants, the GPU provides the strongest performance when the DD and intermediate frontiers fit in device memory, whereas the CPU remains more reliable under memory pressure.
 
-Future work will address the remaining scalability limits on both architectures. On the CPU, dividing large node-frontier updates among multiple threads could reduce load imbalance and improve scaling beyond the current node-level decomposition. On the GPU, eliminating duplicate top-down and bottom-up arc storage, reusing temporary buffers more aggressively, and routing operations that exceed device memory to the CPU could improve robustness without sacrificing GPU performance on smaller frontiers. Developing a DD-based branch-and-bound framework for solving MODO problems can also help in addressing the memory pressure as one could avoid constructing and retaining an exact DD in memory, along with the corresponding node frontiers. Note that the parallelization techniques developed in this work can be directly applied to such a framework to accelerate the recovery of primal and dual bounds sets from restricted and relaxed DDs, respectively.
+The results identify two immediate directions for improving scalability. On the CPU, dividing large node-frontier updates among multiple threads could reduce load imbalance beyond the current node-level decomposition. On the GPU, sharing the flattened arc representation between traversal directions, reusing temporary buffers, and routing operations that exceed device memory to the CPU could improve robustness while retaining GPU performance on smaller frontiers.
 
-
-% This paper parallelized exact bidirectional PF enumeration on DDs, exploiting parallelism at the level of nodes within a layer, labels within a node, and products across the cutset. The CPU implementation delivers consistent speedups over serial enumeration, up to $7.83\times$ on MOTSP, while the GPU implementation pushes decomposition below the level of a single node to reach up to $20.88\times$ on MOSPP but is more memory-bound as a result. Relative to the MIP baseline, DD-based enumeration is markedly more robust on MOKP and MOTSP, though the MIP baseline remains competitive on large, low-objective MOSPP instances where DD-based frontiers grow large. Both gaps trace back to the same bottleneck: intermediate frontier size relative to available memory.
-
-% Since that bottleneck is shared, we see two immediate directions and one longer-term one. On the implementation side, our GPU implementation keeps separate flattened top-down and bottom-up representations that double its baseline device-memory footprint; unifying them into one shared representation, together with a scheduler that routes each layer expansion or cutset batch to whichever of the CPU or GPU its memory footprint favors, would let a single run keep the GPU's speed without its memory failures. Since the MIP baseline wins precisely where DD-based frontiers overrun memory, a solver that monitors frontier growth and falls back to a MIP-style box search before memory is exhausted could combine the objective-scalability of DD-based enumeration with the memory-independence of the MIP baseline. A related, longer-term limitation is that our approach assumes a full exact DD already exists: the out-of-memory failures we report ultimately stem from holding this complete structure, and its complete node frontiers, in memory at once. Embedding DD-based PF enumeration in a branch-and-bound scheme over restricted and relaxed diagrams \cite{bergman2016decision}, which yield primal and dual bound sets without ever building the full exact diagram, would address this pressure directly, and the label-propagation and dominance-filtering kernels we parallelize here would carry over unchanged to speed up bound recovery in that setting.
-
-% This asymmetry means neither implementation dominates the other, and the choice between them is information available at run time rather than something fixed in advance. A natural extension is a scheduler that routes each layer expansion or cutset batch to whichever device its size and memory footprint favor, falling back to the CPU when a node frontier would overflow GPU memory and to the GPU when it would not. More broadly, the batching already used in the cutset merge, splitting products into memory-bounded chunks against a running frontier, applies within a single layer; extending it so layer expansion also streams through fixed-size candidate buffers, instead of materializing an entire layer at once, would let the GPU implementation trade some of its speed for the graceful degradation the CPU implementation already exhibits.
+A longer-term limitation is the assumption that the complete exact DD and its node frontiers fit in memory. Embedding PF enumeration within a DD-based branch-and-bound framework over restricted and relaxed DDs \citep{bergman2016decision} would avoid constructing and retaining the full exact diagram. The parallel label-propagation and dominance-filtering operations developed here could then be reused to accelerate the recovery of primal and dual bound sets from restricted and relaxed DDs, respectively.
 
 \bibliography{references}
 
@@ -788,88 +651,8 @@ Future work will address the remaining scalability limits on both architectures.
 GPUs are throughput-oriented processors that achieve high performance by executing many lightweight threads in parallel. In contrast, CPUs comprise a small number of complex cores optimized for low-latency execution and sophisticated control flow. This architectural difference makes GPUs particularly effective for data-parallel workloads in which the same operation is applied independently across many inputs \cite{lindholm2008nvidia}.
 \Cref{fig:gpu_arch} illustrates the GPU execution and memory hierarchy. Computation is launched as a \emph{kernel}, which executes as a large collection of \emph{threads}. Threads are grouped into \emph{thread blocks}, and all blocks in a kernel launch form a \emph{grid} \cite{nickolls2008scalable}. The GPU schedules thread blocks onto \emph{Streaming Multiprocessors} (SMs), where each SM can host multiple blocks concurrently and executes threads in a \emph{Single Instruction Multiple Thread} (SIMT) manner, where threads follow the same instruction stream while operating on different data.
 
+\input{figures/gpu.tex}
 
-\begin{figure}[tbp]
-    \centering
-    \resizebox{\linewidth}{!}{
-    \begin{tikzpicture}[
-        sm/.style={draw, thick, fill=blue!5, rounded corners, minimum width=3.8cm, minimum height=3.8cm},
-        block/.style={draw, dashed, thick, fill=blue!10, rounded corners, inner sep=3pt},
-        thread/.style={draw, fill=green!40, minimum width=0.25cm, minimum height=0.25cm, inner sep=0pt},
-        mem/.style={draw, thick, fill=orange!20, minimum width=3.2cm, minimum height=0.6cm, align=center},
-        l2/.style={draw, thick, fill=orange!25, minimum width=9cm, minimum height=0.7cm, align=center},
-        gmem/.style={draw, ultra thick, fill=orange!30, minimum width=9cm, minimum height=0.7cm, align=center},
-        device/.style={draw, ultra thick, fill=gray!10, rounded corners, inner sep=15pt}
-    ]
-
-    % SM 1
-    \node[sm] (sm1) at (0,0) {};
-    \node[anchor=north, font=\bfseries, yshift=-0.1cm] at (sm1.north) {SM 1};
-    \node[mem, anchor=north, yshift=-0.7cm] (smem1) at (sm1.north) {Shared Mem / L1};
-
-    % SM 1 - Block 1
-    \node[block, minimum width=1.3cm, minimum height=1.3cm] (s1b1) at ($(sm1.center) + (-0.7, -0.4)$) {};
-    \node[font=\small, anchor=north, yshift=-0.05cm] at (s1b1.south) {Block};
-    \foreach \i/\x in {1/-0.3, 2/0, 3/0.3} {
-        \foreach \j/\y in {1/0.3, 2/0, 3/-0.3} {
-            \node[thread] (s1b1t\i\j) at ($(s1b1.center) + (\x, \y)$) {};
-        }
-    }
-
-    % SM 1 - Multiple Blocks Dots
-    \node[font=\Large] at ($(sm1.center) + (0.9, -0.4)$) {\dots};
-
-    % Explicit annotation for Threads
-    \draw[<-, thick] (s1b1t33.east) -- ++(0.5, 0) node[right, font=\small, inner sep=1pt] {Thread};
-
-    % Dots indicating more SMs
-    \node[right=0.25cm of sm1, font=\huge] (dots) {\dots};
-
-    % SM N
-    \node[sm, right=0.25cm of dots] (smn) {};
-    \node[anchor=north, font=\bfseries, yshift=-0.1cm] at (smn.north) {SM $n$};
-    \node[mem, anchor=north, yshift=-0.7cm] (smemn) at (smn.north) {Shared Mem / L1};
-
-    % SM N - Block 1
-    \node[block, minimum width=1.3cm, minimum height=1.3cm] (snb1) at ($(smn.center) + (-0.7, -0.4)$) {};
-    \node[font=\small, anchor=north, yshift=-0.05cm] at (snb1.south) {Block};
-    \foreach \i/\x in {1/-0.3, 2/0, 3/0.3} {
-        \foreach \j/\y in {1/0.3, 2/0, 3/-0.3} {
-            \node[thread] (snb1t\i\j) at ($(snb1.center) + (\x, \y)$) {};
-        }
-    }
-
-    % SM N - Multiple Blocks Dots
-    \node[font=\Large] at ($(smn.center) + (0.9, -0.4)$) {\dots};
-
-    % Logical Grid Brace
-    \draw[decorate, decoration={brace, amplitude=10pt}, ultra thick, purple!80!black]
-        ([yshift=0.2cm]sm1.north west) -- ([yshift=0.2cm]smn.north east)
-        node[midway, above=12pt, font=\bfseries, purple!80!black] {Grid (Logical Collection of Thread Blocks)};
-
-    % L2 Cache (Centered between SM1 and SMN)
-    \node[l2, anchor=north] (l2cache) at ($(sm1.south)!0.5!(smn.south) + (0, -0.8cm)$) {\textbf{L2 Cache}};
-
-    % Global Memory
-    \node[gmem, below=0.8cm of l2cache] (globalmem) {\textbf{Global Memory (DRAM)}};
-
-    % Connections
-    \draw[<->, thick] (sm1.south) -- (sm1.south |- l2cache.north);
-    \draw[<->, thick] (smn.south) -- (smn.south |- l2cache.north);
-    \draw[<->, ultra thick] (l2cache.south) -- (globalmem.north);
-
-    % Device Background Layer
-    \begin{scope}[on background layer]
-        % Add a hidden coordinate to push the top border up slightly for the label and brace
-        \coordinate (topleft) at ([xshift=-0.2cm, yshift=1.6cm]sm1.north west);
-        \node[device, fit=(topleft) (smn) (globalmem)] (gpu) {};
-        \node[anchor=north west, font=\Large\bfseries] at (gpu.north west) {GPU Device};
-    \end{scope}
-
-    \end{tikzpicture}}
-    \caption{Schematic representation of a GPU architecture.}
-    \label{fig:gpu_arch}
-\end{figure}
 The memory system is also hierarchical. Threads within an SM have access to fast on-chip storage, including registers and shared memory, which enables efficient intra-block cooperation and synchronization. SMs connect to a larger, device-wide cache (L2) and ultimately to high-capacity but high-latency global memory (DRAM). Effective GPU implementations therefore aim to expose ample parallelism while limiting expensive global-memory traffic \cite{nickolls2010gpu}.
 This execution model is well suited for workloads dominated by large numbers of independent arithmetic operations and comparisons. In particular, pairwise dominance checks required during PF enumeration in Algorithm~\ref{alg:bidir_pf} are natural candidates for GPU acceleration.
 
@@ -1051,74 +834,74 @@ The complete MOKP runtime comparison is shown in \Cref{tab:mokp_result}. The com
 \begin{table*}[t]
 \centering
 \scriptsize
-\caption{MOKP Pareto Enumeration Runtime Comparison Across Enumeration Methods}
+\caption{Detailed results for MOKP across all problem sizes.}
 \resizebox{0.8\textwidth}{!}{%
-\begin{tabular}{rrlrrl|rrlrrl}
+\begin{tabular}{rrlrrrrrlrrr}
 \toprule
-$n$ & $m$ & Method & Time (S) & Speed-up & $S^{(M,T)}$ & $n$ & $m$ & Method & Time (S) & Speed-up & $S^{(M,T)}$ \\
+$n$ & $m$ & Method & Time (S) & Speedup & $S^{(M,T)}$ & $n$ & $m$ & Method & Time (S) & Speedup & $S^{(M,T)}$ \\
 \midrule
 \multirow{8}{*}{40} & \multirow{8}{*}{6} & DPA-TS & 1371 & 0.01$\times$ & $2^{(0, 8)}$ & \multirow{8}{*}{40} & \multirow{8}{*}{7} & DPA-TS & -- & -- & $0^{(0, 10)}$ \\
  &  & DPA-A & 1439 & 0.01$\times$ & $2^{(0, 8)}$ &  &  & DPA-A & -- & -- & $0^{(0, 10)}$ \\
- &  & Coup & 10 & 1.00$\times$ & $10$ &  &  & Coup & 33 & 1.00$\times$ & $10$ \\
- &  & \texttt{Coup-4} & 6 & 1.87$\times$ & $10$ &  &  & \texttt{Coup-4} & 16 & 2.12$\times$ & $10$ \\
- &  & \texttt{Coup-8} & 5 & 2.15$\times$ & $10$ &  &  & \texttt{Coup-8} & 13 & 2.63$\times$ & $10$ \\
- &  & \texttt{Coup-16} & 4 & 2.60$\times$ & $10$ &  &  & \texttt{Coup-16} & 11 & 3.21$\times$ & $10$ \\
- &  & \texttt{G-TD} & 3 & 4.31$\times$ & $10$ &  &  & \texttt{G-TD} & 5 & 7.12$\times$ & $10$ \\
- &  & \texttt{G-Coup} & \textbf{2} & 5.51$\times$ & $10$ &  &  & \texttt{G-Coup} & \textbf{4} & 9.71$\times$ & $10$ \\
+ &  & \textsc{Smdd}$^+$ & 10 & 1.00$\times$ & $10$ &  &  & \textsc{Smdd}$^+$ & 33 & 1.00$\times$ & $10$ \\
+ &  & \textsc{PmddC}(4)$^+$ & 6 & 1.87$\times$ & $10$ &  &  & \textsc{PmddC}(4)$^+$ & 16 & 2.12$\times$ & $10$ \\
+ &  & \textsc{PmddC}(8)$^+$ & 5 & 2.15$\times$ & $10$ &  &  & \textsc{PmddC}(8)$^+$ & 13 & 2.63$\times$ & $10$ \\
+ &  & \textsc{PmddC}(16)$^+$ & 4 & 2.60$\times$ & $10$ &  &  & \textsc{PmddC}(16)$^+$ & 11 & 3.21$\times$ & $10$ \\
+ &  & \textsc{PmddG$^+$-TD} & 3 & 4.31$\times$ & $10$ &  &  & \textsc{PmddG$^+$-TD} & 5 & 7.12$\times$ & $10$ \\
+ &  & \textsc{PmddG}$^+$ & \textbf{2} & 5.51$\times$ & $10$ &  &  & \textsc{PmddG}$^+$ & \textbf{4} & 9.71$\times$ & $10$ \\
 \midrule
 \multirow{8}{*}{50} & \multirow{8}{*}{5} & DPA-TS & 1752 & 0.01$\times$ & $5^{(0, 5)}$ & \multirow{8}{*}{50} & \multirow{8}{*}{6} & DPA-TS & -- & -- & $0^{(0, 10)}$ \\
  &  & DPA-A & 1625 & 0.01$\times$ & $5^{(0, 5)}$ &  &  & DPA-A & -- & -- & $0^{(0, 10)}$ \\
- &  & Coup & 19 & 1.00$\times$ & $10$ &  &  & Coup & 184 & 1.00$\times$ & $10$ \\
- &  & \texttt{Coup-4} & 9 & 2.06$\times$ & $10$ &  &  & \texttt{Coup-4} & 82 & 2.26$\times$ & $10$ \\
- &  & \texttt{Coup-8} & 8 & 2.42$\times$ & $10$ &  &  & \texttt{Coup-8} & 63 & 2.94$\times$ & $10$ \\
- &  & \texttt{Coup-16} & 7 & 2.93$\times$ & $10$ &  &  & \texttt{Coup-16} & 52 & 3.59$\times$ & $10$ \\
- &  & \texttt{G-TD} & \textbf{3} & 6.49$\times$ & $10$ &  &  & \texttt{G-TD} & 45 & 4.09$\times$ & $10$ \\
- &  & \texttt{G-Coup} & 4 & 5.89$\times$ & $10$ &  &  & \texttt{G-Coup} & \textbf{26} & 7.12$\times$ & $10$ \\
+ &  & \textsc{Smdd}$^+$ & 19 & 1.00$\times$ & $10$ &  &  & \textsc{Smdd}$^+$ & 184 & 1.00$\times$ & $10$ \\
+ &  & \textsc{PmddC}(4)$^+$ & 9 & 2.06$\times$ & $10$ &  &  & \textsc{PmddC}(4)$^+$ & 82 & 2.26$\times$ & $10$ \\
+ &  & \textsc{PmddC}(8)$^+$ & 8 & 2.42$\times$ & $10$ &  &  & \textsc{PmddC}(8)$^+$ & 63 & 2.94$\times$ & $10$ \\
+ &  & \textsc{PmddC}(16)$^+$ & 7 & 2.93$\times$ & $10$ &  &  & \textsc{PmddC}(16)$^+$ & 52 & 3.59$\times$ & $10$ \\
+ &  & \textsc{PmddG$^+$-TD} & \textbf{3} & 6.49$\times$ & $10$ &  &  & \textsc{PmddG$^+$-TD} & 45 & 4.09$\times$ & $10$ \\
+ &  & \textsc{PmddG}$^+$ & 4 & 5.89$\times$ & $10$ &  &  & \textsc{PmddG}$^+$ & \textbf{26} & 7.12$\times$ & $10$ \\
 \midrule
 \multirow{8}{*}{50} & \multirow{8}{*}{7} & DPA-TS & -- & -- & $0^{(0, 10)}$ & \multirow{8}{*}{60} & \multirow{8}{*}{4} & DPA-TS & 1102 & 0.01$\times$ & $9^{(0, 1)}$ \\
  &  & DPA-A & -- & -- & $0^{(0, 10)}$ &  &  & DPA-A & 925 & 0.02$\times$ & $9^{(0, 1)}$ \\
- &  & Coup & 499 & 1.00$\times$ & $10$ &  &  & Coup & 16 & 1.00$\times$ & $10$ \\
- &  & \texttt{Coup-4} & 229 & 2.18$\times$ & $10$ &  &  & \texttt{Coup-4} & 8 & 2.04$\times$ & $10$ \\
- &  & \texttt{Coup-8} & 180 & 2.78$\times$ & $10$ &  &  & \texttt{Coup-8} & 7 & 2.36$\times$ & $10$ \\
- &  & \texttt{Coup-16} & 150 & 3.34$\times$ & $10$ &  &  & \texttt{Coup-16} & 6 & 3.01$\times$ & $10$ \\
- &  & \texttt{G-TD} & \textbf{81} & 6.20$\times$ & $10$ &  &  & \texttt{G-TD} & \textbf{3} & 7.74$\times$ & $10$ \\
- &  & \texttt{G-Coup} & 82 & 6.08$\times$ & $10$ &  &  & \texttt{G-Coup} & 3 & 6.98$\times$ & $10$ \\
+ &  & \textsc{Smdd}$^+$ & 499 & 1.00$\times$ & $10$ &  &  & \textsc{Smdd}$^+$ & 16 & 1.00$\times$ & $10$ \\
+ &  & \textsc{PmddC}(4)$^+$ & 229 & 2.18$\times$ & $10$ &  &  & \textsc{PmddC}(4)$^+$ & 8 & 2.04$\times$ & $10$ \\
+ &  & \textsc{PmddC}(8)$^+$ & 180 & 2.78$\times$ & $10$ &  &  & \textsc{PmddC}(8)$^+$ & 7 & 2.36$\times$ & $10$ \\
+ &  & \textsc{PmddC}(16)$^+$ & 150 & 3.34$\times$ & $10$ &  &  & \textsc{PmddC}(16)$^+$ & 6 & 3.01$\times$ & $10$ \\
+ &  & \textsc{PmddG$^+$-TD} & \textbf{81} & 6.20$\times$ & $10$ &  &  & \textsc{PmddG$^+$-TD} & \textbf{3} & 7.74$\times$ & $10$ \\
+ &  & \textsc{PmddG}$^+$ & 82 & 6.08$\times$ & $10$ &  &  & \textsc{PmddG}$^+$ & 3 & 6.98$\times$ & $10$ \\
 \midrule
 \multirow{8}{*}{60} & \multirow{8}{*}{5} & DPA-TS & -- & -- & $0^{(0, 10)}$ & \multirow{8}{*}{60} & \multirow{8}{*}{6} & DPA-TS & -- & -- & $0^{(0, 10)}$ \\
  &  & DPA-A & -- & -- & $0^{(0, 10)}$ &  &  & DPA-A & -- & -- & $0^{(0, 10)}$ \\
- &  & Coup & 190 & 1.00$\times$ & $10$ &  &  & Coup & 849 & 1.00$\times$ & $8^{(0, 2)}$ \\
- &  & \texttt{Coup-4} & 84 & 2.27$\times$ & $10$ &  &  & \texttt{Coup-4} & 678 & 1.25$\times$ & $10$ \\
- &  & \texttt{Coup-8} & 67 & 2.83$\times$ & $10$ &  &  & \texttt{Coup-8} & 424 & 2.00$\times$ & $10$ \\
- &  & \texttt{Coup-16} & 57 & 3.34$\times$ & $10$ &  &  & \texttt{Coup-16} & 341 & 2.49$\times$ & $10$ \\
- &  & \texttt{G-TD} & \textbf{30} & 6.31$\times$ & $10$ &  &  & \texttt{G-TD} & 201 & 4.23$\times$ & $10$ \\
- &  & \texttt{G-Coup} & 30 & 6.31$\times$ & $10$ &  &  & \texttt{G-Coup} & \textbf{156} & 5.45$\times$ & $10$ \\
+ &  & \textsc{Smdd}$^+$ & 190 & 1.00$\times$ & $10$ &  &  & \textsc{Smdd}$^+$ & 849 & 1.00$\times$ & $8^{(0, 2)}$ \\
+ &  & \textsc{PmddC}(4)$^+$ & 84 & 2.27$\times$ & $10$ &  &  & \textsc{PmddC}(4)$^+$ & 678 & 1.25$\times$ & $10$ \\
+ &  & \textsc{PmddC}(8)$^+$ & 67 & 2.83$\times$ & $10$ &  &  & \textsc{PmddC}(8)$^+$ & 424 & 2.00$\times$ & $10$ \\
+ &  & \textsc{PmddC}(16)$^+$ & 57 & 3.34$\times$ & $10$ &  &  & \textsc{PmddC}(16)$^+$ & 341 & 2.49$\times$ & $10$ \\
+ &  & \textsc{PmddG$^+$-TD} & \textbf{30} & 6.31$\times$ & $10$ &  &  & \textsc{PmddG$^+$-TD} & 201 & 4.23$\times$ & $10$ \\
+ &  & \textsc{PmddG}$^+$ & 30 & 6.31$\times$ & $10$ &  &  & \textsc{PmddG}$^+$ & \textbf{156} & 5.45$\times$ & $10$ \\
 \midrule
 \multirow{8}{*}{60} & \multirow{8}{*}{7} & DPA-TS & -- & -- & $0^{(0, 10)}$ & \multirow{8}{*}{70} & \multirow{8}{*}{3} & DPA-TS & 87 & 0.05$\times$ & $10$ \\
  &  & DPA-A & -- & -- & $0^{(0, 10)}$ &  &  & DPA-A & 62 & 0.07$\times$ & $10$ \\
- &  & Coup & 1244 & 1.00$\times$ & $6^{(0, 4)}$ &  &  & Coup & 5 & 1.00$\times$ & $10$ \\
- &  & \texttt{Coup-4} & 969 & 1.28$\times$ & $7^{(0, 3)}$ &  &  & \texttt{Coup-4} & 3 & 1.61$\times$ & $10$ \\
- &  & \texttt{Coup-8} & 730 & 1.71$\times$ & $7^{(0, 3)}$ &  &  & \texttt{Coup-8} & 3 & 1.61$\times$ & $10$ \\
- &  & \texttt{Coup-16} & 607 & 2.05$\times$ & $7^{(0, 3)}$ &  &  & \texttt{Coup-16} & 3 & 1.80$\times$ & $10$ \\
- &  & \texttt{G-TD} & \textbf{325} & 3.83$\times$ & $6^{(4, 0)}$ &  &  & \texttt{G-TD} & \textbf{2} & 3.38$\times$ & $10$ \\
- &  & \texttt{G-Coup} & 787 & 1.58$\times$ & $10$ &  &  & \texttt{G-Coup} & 2 & 2.78$\times$ & $10$ \\
+ &  & \textsc{Smdd}$^+$ & 1244 & 1.00$\times$ & $6^{(0, 4)}$ &  &  & \textsc{Smdd}$^+$ & 5 & 1.00$\times$ & $10$ \\
+ &  & \textsc{PmddC}(4)$^+$ & 969 & 1.28$\times$ & $7^{(0, 3)}$ &  &  & \textsc{PmddC}(4)$^+$ & 3 & 1.61$\times$ & $10$ \\
+ &  & \textsc{PmddC}(8)$^+$ & 730 & 1.71$\times$ & $7^{(0, 3)}$ &  &  & \textsc{PmddC}(8)$^+$ & 3 & 1.61$\times$ & $10$ \\
+ &  & \textsc{PmddC}(16)$^+$ & 607 & 2.05$\times$ & $7^{(0, 3)}$ &  &  & \textsc{PmddC}(16)$^+$ & 3 & 1.80$\times$ & $10$ \\
+ &  & \textsc{PmddG$^+$-TD} & \textbf{325} & 3.83$\times$ & $6^{(4, 0)}$ &  &  & \textsc{PmddG$^+$-TD} & \textbf{2} & 3.38$\times$ & $10$ \\
+ &  & \textsc{PmddG}$^+$ & 787 & 1.58$\times$ & $10$ &  &  & \textsc{PmddG}$^+$ & 2 & 2.78$\times$ & $10$ \\
 \midrule
 \multirow{8}{*}{70} & \multirow{8}{*}{4} & DPA-TS & 2144 & 0.03$\times$ & $6^{(0, 4)}$ & \multirow{8}{*}{70} & \multirow{8}{*}{5} & DPA-TS & -- & -- & $0^{(0, 10)}$ \\
  &  & DPA-A & 2130 & 0.03$\times$ & $7^{(0, 3)}$ &  &  & DPA-A & -- & -- & $0^{(0, 10)}$ \\
- &  & Coup & 70 & 1.00$\times$ & $10$ &  &  & Coup & 768 & 1.00$\times$ & $8^{(0, 2)}$ \\
- &  & \texttt{Coup-4} & 33 & 2.12$\times$ & $10$ &  &  & \texttt{Coup-4} & 728 & 1.05$\times$ & $9^{(0, 1)}$ \\
- &  & \texttt{Coup-8} & 27 & 2.64$\times$ & $10$ &  &  & \texttt{Coup-8} & 539 & 1.42$\times$ & $9^{(0, 1)}$ \\
- &  & \texttt{Coup-16} & 23 & 3.08$\times$ & $10$ &  &  & \texttt{Coup-16} & 649 & 1.18$\times$ & $10$ \\
- &  & \texttt{G-TD} & \textbf{9} & 8.41$\times$ & $10$ &  &  & \texttt{G-TD} & \textbf{182} & 4.22$\times$ & $9^{(1, 0)}$ \\
- &  & \texttt{G-Coup} & 9 & 8.28$\times$ & $10$ &  &  & \texttt{G-Coup} & 291 & 2.64$\times$ & $10$ \\
+ &  & \textsc{Smdd}$^+$ & 70 & 1.00$\times$ & $10$ &  &  & \textsc{Smdd}$^+$ & 768 & 1.00$\times$ & $8^{(0, 2)}$ \\
+ &  & \textsc{PmddC}(4)$^+$ & 33 & 2.12$\times$ & $10$ &  &  & \textsc{PmddC}(4)$^+$ & 728 & 1.05$\times$ & $9^{(0, 1)}$ \\
+ &  & \textsc{PmddC}(8)$^+$ & 27 & 2.64$\times$ & $10$ &  &  & \textsc{PmddC}(8)$^+$ & 539 & 1.42$\times$ & $9^{(0, 1)}$ \\
+ &  & \textsc{PmddC}(16)$^+$ & 23 & 3.08$\times$ & $10$ &  &  & \textsc{PmddC}(16)$^+$ & 649 & 1.18$\times$ & $10$ \\
+ &  & \textsc{PmddG$^+$-TD} & \textbf{9} & 8.41$\times$ & $10$ &  &  & \textsc{PmddG$^+$-TD} & \textbf{182} & 4.22$\times$ & $9^{(1, 0)}$ \\
+ &  & \textsc{PmddG}$^+$ & 9 & 8.28$\times$ & $10$ &  &  & \textsc{PmddG}$^+$ & 291 & 2.64$\times$ & $10$ \\
 \midrule
 \multirow{8}{*}{70} & \multirow{8}{*}{6} & DPA-TS & -- & -- & $0^{(0, 10)}$ & \multirow{8}{*}{70} & \multirow{8}{*}{7} & DPA-TS & -- & -- & $0^{(0, 10)}$ \\
  &  & DPA-A & -- & -- & $0^{(0, 10)}$ &  &  & DPA-A & -- & -- & $0^{(0, 10)}$ \\
- &  & Coup & 1549 & 1.00$\times$ & $5^{(0, 5)}$ &  &  & Coup & 1650 & 1.00$\times$ & $3^{(0, 7)}$ \\
- &  & \texttt{Coup-4} & 1326 & 1.17$\times$ & $7^{(0, 3)}$ &  &  & \texttt{Coup-4} & 1391 & 1.19$\times$ & $4^{(0, 6)}$ \\
- &  & \texttt{Coup-8} & 1008 & 1.54$\times$ & $7^{(0, 3)}$ &  &  & \texttt{Coup-8} & 1757 & 0.94$\times$ & $6^{(0, 4)}$ \\
- &  & \texttt{Coup-16} & 862 & 1.80$\times$ & $7^{(0, 3)}$ &  &  & \texttt{Coup-16} & 1708 & 0.97$\times$ & $7^{(0, 3)}$ \\
- &  & \texttt{G-TD} & \textbf{335} & 4.63$\times$ & $6^{(4, 0)}$ &  &  & \texttt{G-TD} & \textbf{372} & 4.44$\times$ & $3^{(7, 0)}$ \\
- &  & \texttt{G-Coup} & 1010 & 1.53$\times$ & $10$ &  &  & \texttt{G-Coup} & 907 & 1.82$\times$ & $6^{(3, 1)}$ \\
+ &  & \textsc{Smdd}$^+$ & 1549 & 1.00$\times$ & $5^{(0, 5)}$ &  &  & \textsc{Smdd}$^+$ & 1650 & 1.00$\times$ & $3^{(0, 7)}$ \\
+ &  & \textsc{PmddC}(4)$^+$ & 1326 & 1.17$\times$ & $7^{(0, 3)}$ &  &  & \textsc{PmddC}(4)$^+$ & 1391 & 1.19$\times$ & $4^{(0, 6)}$ \\
+ &  & \textsc{PmddC}(8)$^+$ & 1008 & 1.54$\times$ & $7^{(0, 3)}$ &  &  & \textsc{PmddC}(8)$^+$ & 1757 & 0.94$\times$ & $6^{(0, 4)}$ \\
+ &  & \textsc{PmddC}(16)$^+$ & 862 & 1.80$\times$ & $7^{(0, 3)}$ &  &  & \textsc{PmddC}(16)$^+$ & 1708 & 0.97$\times$ & $7^{(0, 3)}$ \\
+ &  & \textsc{PmddG$^+$-TD} & \textbf{335} & 4.63$\times$ & $6^{(4, 0)}$ &  &  & \textsc{PmddG$^+$-TD} & \textbf{372} & 4.44$\times$ & $3^{(7, 0)}$ \\
+ &  & \textsc{PmddG}$^+$ & 1010 & 1.53$\times$ & $10$ &  &  & \textsc{PmddG}$^+$ & 907 & 1.82$\times$ & $6^{(3, 1)}$ \\
 \bottomrule
 \end{tabular}
 }
@@ -1128,86 +911,52 @@ $n$ & $m$ & Method & Time (S) & Speed-up & $S^{(M,T)}$ & $n$ & $m$ & Method & Ti
 \begin{table*}[t]
 \centering
 \scriptsize
-\caption{MOSPP Pareto Enumeration Runtime Comparison Across Enumeration Methods}
+\caption{Detailed results for MOSPP across all problem sizes.}
 \resizebox{0.8\textwidth}{!}{%
-\begin{tabular}{rrlrrl|rrlrrl}
+\begin{tabular}{rrlrrrrrlrrr}
 \toprule
-$n$ & $m$ & Method & Time (S) & Speed-up & $S^{(M,T)}$ & $n$ & $m$ & Method & Time (S) & Speed-up & $S^{(M,T)}$ \\
+$n$ & $m$ & Method & Time (S) & Speedup & $S^{(M,T)}$ & $n$ & $m$ & Method & Time (S) & Speedup & $S^{(M,T)}$ \\
 \midrule
 \multirow{8}{*}{150} & \multirow{8}{*}{3} & DPA-TS & 11 & 1.12$\times$ & $10$ & \multirow{8}{*}{150} & \multirow{8}{*}{4} & DPA-TS & 486 & 0.03$\times$ & $10$ \\
  &  & DPA-A & 8 & 1.59$\times$ & $10$ &  &  & DPA-A & 420 & 0.04$\times$ & $10$ \\
- &  & Coup & 12 & 1.00$\times$ & $10$ &  &  & Coup & 16 & 1.00$\times$ & $10$ \\
- &  & \texttt{Coup-4} & 8 & 1.50$\times$ & $10$ &  &  & \texttt{Coup-4} & 10 & 1.54$\times$ & $10$ \\
- &  & \texttt{Coup-8} & 8 & 1.50$\times$ & $10$ &  &  & \texttt{Coup-8} & 9 & 1.84$\times$ & $10$ \\
- &  & \texttt{Coup-16} & 8 & 1.51$\times$ & $10$ &  &  & \texttt{Coup-16} & 7 & 2.16$\times$ & $10$ \\
- &  & \texttt{G-TD} & 7 & 1.80$\times$ & $10$ &  &  & \texttt{G-TD} & 6 & 2.74$\times$ & $10$ \\
- &  & \texttt{G-Coup} & \textbf{5} & 2.44$\times$ & $9^{(1, 0)}$ &  &  & \texttt{G-Coup} & \textbf{6} & 2.94$\times$ & $9^{(1, 0)}$ \\
+ &  & \textsc{Smdd} & 12 & 1.00$\times$ & $10$ &  &  & \textsc{Smdd} & 16 & 1.00$\times$ & $10$ \\
+ &  & \textsc{PmddC}(4) & 8 & 1.50$\times$ & $10$ &  &  & \textsc{PmddC}(4) & 10 & 1.54$\times$ & $10$ \\
+ &  & \textsc{PmddC}(8) & 8 & 1.50$\times$ & $10$ &  &  & \textsc{PmddC}(8) & 9 & 1.84$\times$ & $10$ \\
+ &  & \textsc{PmddC}(16) & 8 & 1.51$\times$ & $10$ &  &  & \textsc{PmddC}(16) & 7 & 2.16$\times$ & $10$ \\
+ &  & \textsc{PmddG-TD} & 7 & 1.80$\times$ & $10$ &  &  & \textsc{PmddG-TD} & 6 & 2.74$\times$ & $10$ \\
+ &  & \textsc{PmddG} & \textbf{5} & 2.44$\times$ & $9^{(1, 0)}$ &  &  & \textsc{PmddG} & \textbf{6} & 2.94$\times$ & $9^{(1, 0)}$ \\
 \midrule
 \multirow{8}{*}{150} & \multirow{8}{*}{5} & DPA-TS & 1929 & 0.02$\times$ & $5^{(0, 5)}$ & \multirow{8}{*}{150} & \multirow{8}{*}{6} & DPA-TS & 1052 & 0.04$\times$ & $1^{(0, 9)}$ \\
  &  & DPA-A & 1807 & 0.02$\times$ & $5^{(0, 5)}$ &  &  & DPA-A & 1085 & 0.04$\times$ & $1^{(0, 9)}$ \\
- &  & Coup & 34 & 1.00$\times$ & $10$ &  &  & Coup & 47 & 1.00$\times$ & $10$ \\
- &  & \texttt{Coup-4} & 20 & 1.72$\times$ & $10$ &  &  & \texttt{Coup-4} & 26 & 1.86$\times$ & $10$ \\
- &  & \texttt{Coup-8} & 18 & 1.89$\times$ & $10$ &  &  & \texttt{Coup-8} & 22 & 2.16$\times$ & $10$ \\
- &  & \texttt{Coup-16} & 16 & 2.11$\times$ & $10$ &  &  & \texttt{Coup-16} & 21 & 2.32$\times$ & $10$ \\
- &  & \texttt{G-TD} & \textbf{10} & 3.35$\times$ & $10$ &  &  & \texttt{G-TD} & \textbf{6} & 8.42$\times$ & $10$ \\
- &  & \texttt{G-Coup} & 11 & 3.17$\times$ & $10$ &  &  & \texttt{G-Coup} & 7 & 6.76$\times$ & $10$ \\
+ &  & \textsc{Smdd} & 34 & 1.00$\times$ & $10$ &  &  & \textsc{Smdd} & 47 & 1.00$\times$ & $10$ \\
+ &  & \textsc{PmddC}(4) & 20 & 1.72$\times$ & $10$ &  &  & \textsc{PmddC}(4) & 26 & 1.86$\times$ & $10$ \\
+ &  & \textsc{PmddC}(8) & 18 & 1.89$\times$ & $10$ &  &  & \textsc{PmddC}(8) & 22 & 2.16$\times$ & $10$ \\
+ &  & \textsc{PmddC}(16) & 16 & 2.11$\times$ & $10$ &  &  & \textsc{PmddC}(16) & 21 & 2.32$\times$ & $10$ \\
+ &  & \textsc{PmddG-TD} & \textbf{10} & 3.35$\times$ & $10$ &  &  & \textsc{PmddG-TD} & \textbf{6} & 8.42$\times$ & $10$ \\
+ &  & \textsc{PmddG} & 11 & 3.17$\times$ & $10$ &  &  & \textsc{PmddG} & 7 & 6.76$\times$ & $10$ \\
 \midrule
 \multirow{8}{*}{150} & \multirow{8}{*}{7} & DPA-TS & -- & -- & $0^{(0, 10)}$ & \multirow{8}{*}{200} & \multirow{8}{*}{3} & DPA-TS & 32 & 5.15$\times$ & $10$ \\
  &  & DPA-A & -- & -- & $0^{(0, 10)}$ &  &  & DPA-A & \textbf{22} & 7.53$\times$ & $10$ \\
- &  & Coup & 184 & 1.00$\times$ & $10$ &  &  & Coup & 162 & 1.00$\times$ & $1^{(9, 0)}$ \\
- &  & \texttt{Coup-4} & 84 & 2.20$\times$ & $10$ &  &  & \texttt{Coup-4} & 93 & 1.75$\times$ & $1^{(9, 0)}$ \\
- &  & \texttt{Coup-8} & 71 & 2.61$\times$ & $10$ &  &  & \texttt{Coup-8} & 87 & 1.86$\times$ & $1^{(9, 0)}$ \\
- &  & \texttt{Coup-16} & 96 & 1.91$\times$ & $10$ &  &  & \texttt{Coup-16} & 72 & 2.27$\times$ & $1^{(8, 1)}$ \\
- &  & \texttt{G-TD} & \textbf{9} & 20.88$\times$ & $10$ &  &  & \texttt{G-TD} & -- & -- & $0^{(10, 0)}$ \\
- &  & \texttt{G-Coup} & 17 & 10.98$\times$ & $10$ &  &  & \texttt{G-Coup} & -- & -- & $0^{(10, 0)}$ \\
+ &  & \textsc{Smdd} & 184 & 1.00$\times$ & $10$ &  &  & \textsc{Smdd} & 162 & 1.00$\times$ & $1^{(9, 0)}$ \\
+ &  & \textsc{PmddC}(4) & 84 & 2.20$\times$ & $10$ &  &  & \textsc{PmddC}(4) & 93 & 1.75$\times$ & $1^{(9, 0)}$ \\
+ &  & \textsc{PmddC}(8) & 71 & 2.61$\times$ & $10$ &  &  & \textsc{PmddC}(8) & 87 & 1.86$\times$ & $1^{(9, 0)}$ \\
+ &  & \textsc{PmddC}(16) & 96 & 1.91$\times$ & $10$ &  &  & \textsc{PmddC}(16) & 72 & 2.27$\times$ & $1^{(8, 1)}$ \\
+ &  & \textsc{PmddG-TD} & \textbf{9} & 20.88$\times$ & $10$ &  &  & \textsc{PmddG-TD} & -- & -- & $0^{(10, 0)}$ \\
+ &  & \textsc{PmddG} & 17 & 10.98$\times$ & $10$ &  &  & \textsc{PmddG} & -- & -- & $0^{(10, 0)}$ \\
 \midrule
 \multirow{8}{*}{200} & \multirow{8}{*}{4} & DPA-TS & 913 & 0.20$\times$ & $10$ &  &  &  &  &  &  \\
  &  & DPA-A & 793 & 0.23$\times$ & $10$ &  &  &  &  &  &  \\
- &  & Coup & 186 & 1.00$\times$ & $1^{(9, 0)}$ &  &  &  &  &  &  \\
- &  & \texttt{Coup-4} & 80 & 2.34$\times$ & $1^{(9, 0)}$ &  &  &  &  &  &  \\
- &  & \texttt{Coup-8} & 63 & 2.97$\times$ & $1^{(9, 0)}$ &  &  &  &  &  &  \\
- &  & \texttt{Coup-16} & \textbf{45} & 4.12$\times$ & $1^{(9, 0)}$ &  &  &  &  &  &  \\
- &  & \texttt{G-TD} & -- & -- & $0^{(10, 0)}$ &  &  &  &  &  &  \\
- &  & \texttt{G-Coup} & -- & -- & $0^{(10, 0)}$ &  &  &  &  &  &  \\
+ &  & \textsc{Smdd} & 186 & 1.00$\times$ & $1^{(9, 0)}$ &  &  &  &  &  &  \\
+ &  & \textsc{PmddC}(4) & 80 & 2.34$\times$ & $1^{(9, 0)}$ &  &  &  &  &  &  \\
+ &  & \textsc{PmddC}(8) & 63 & 2.97$\times$ & $1^{(9, 0)}$ &  &  &  &  &  &  \\
+ &  & \textsc{PmddC}(16) & \textbf{45} & 4.12$\times$ & $1^{(9, 0)}$ &  &  &  &  &  &  \\
+ &  & \textsc{PmddG-TD} & -- & -- & $0^{(10, 0)}$ &  &  &  &  &  &  \\
+ &  & \textsc{PmddG} & -- & -- & $0^{(10, 0)}$ &  &  &  &  &  &  \\
 \bottomrule
 \end{tabular}
 }
 \label{tab:mospp_result}
 \end{table*}
-
-The complete MOTSP runtime comparison is shown in \Cref{tab:motsp_result}.
-\begin{table*}[t]
-\centering
-\scriptsize
-\caption{MOTSP Pareto Enumeration Runtime Comparison Across Enumeration Methods}
-\resizebox{0.8\textwidth}{!}{%
-\begin{tabular}{rrlrrl|rrlrrl}
-\toprule
-N & K & Method & Time (S) & Speed-up & $S^{(M,T)}$ & N & K & Method & Time (S) & Speed-up & $S^{(M,T)}$ \\
-\midrule
-\multirow{8}{*}{15} & \multirow{8}{*}{4} & DPA-TS & -- & -- & $0^{(0, 10)}$ & \multirow{8}{*}{15} & \multirow{8}{*}{5} & DPA-TS & -- & -- & $0^{(0, 10)}$ \\
- &  & DPA-A & -- & -- & $0^{(0, 10)}$ &  &  & DPA-A & -- & -- & $0^{(0, 10)}$ \\
- &  & Coup & 23 & 1.00$\times$ & $10$ &  &  & Coup & 335 & 1.00$\times$ & $10$ \\
- &  & \texttt{Coup-4} & 7 & 3.47$\times$ & $10$ &  &  & \texttt{Coup-4} & 115 & 2.92$\times$ & $10$ \\
- &  & \texttt{Coup-8} & 5 & 5.06$\times$ & $10$ &  &  & \texttt{Coup-8} & 82 & 4.11$\times$ & $10$ \\
- &  & \texttt{Coup-16} & 3 & 7.83$\times$ & $10$ &  &  & \texttt{Coup-16} & 67 & 5.05$\times$ & $10$ \\
- &  & \texttt{G-TD} & 3 & 7.50$\times$ & $10$ &  &  & \texttt{G-TD} & \textbf{36} & 9.44$\times$ & $9^{(1, 0)}$ \\
- &  & \texttt{G-Coup} & \textbf{3} & 8.03$\times$ & $10$ &  &  & \texttt{G-Coup} & 48 & 7.04$\times$ & $10$ \\
-\midrule
-\multirow{8}{*}{15} & \multirow{8}{*}{6} & DPA-TS & -- & -- & $0^{(0, 10)}$ & \multirow{8}{*}{15} & \multirow{8}{*}{7} & DPA-TS & -- & -- & $0^{(0, 10)}$ \\
- &  & DPA-A & -- & -- & $0^{(0, 10)}$ &  &  & DPA-A & -- & -- & $0^{(0, 10)}$ \\
- &  & Coup & 1623 & 1.00$\times$ & $9^{(0, 1)}$ &  &  & Coup & 3544 & 1.00$\times$ & $1^{(0, 9)}$ \\
- &  & \texttt{Coup-4} & 870 & 1.87$\times$ & $10$ &  &  & \texttt{Coup-4} & 2508 & 1.41$\times$ & $3^{(0, 7)}$ \\
- &  & \texttt{Coup-8} & 711 & 2.28$\times$ & $10$ &  &  & \texttt{Coup-8} & 2123 & 1.67$\times$ & $3^{(0, 7)}$ \\
- &  & \texttt{Coup-16} & 641 & 2.53$\times$ & $10$ &  &  & \texttt{Coup-16} & 1930 & 1.84$\times$ & $3^{(0, 7)}$ \\
- &  & \texttt{G-TD} & -- & -- & $0^{(10, 0)}$ &  &  & \texttt{G-TD} & -- & -- & $0^{(10, 0)}$ \\
- &  & \texttt{G-Coup} & \textbf{369} & 4.40$\times$ & $10$ &  &  & \texttt{G-Coup} & \textbf{1828} & 1.94$\times$ & $6^{(3, 1)}$ \\
-\bottomrule
-\end{tabular}
-}
-\label{tab:motsp_result}
-\end{table*}
-
 
 
 \end{document}
