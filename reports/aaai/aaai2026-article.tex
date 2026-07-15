@@ -506,41 +506,53 @@ The candidate-then-filter ordering distinguishes the GPU backend from the CPU ba
 
 
 \section{Experiments}
-\label{sec:results}
+\label{sec:experiments}
 
-We evaluate the proposed methods through three research questions. \textbf{RQ1} compares serial multiobjective decision diagrams (\textsc{Smdd}) with the MIP-based defining-point algorithm (DPA) in terms of runtime and robustness. \textbf{RQ2} measures the speedup obtained by the CPU variant of Parallel Multiobjective Decision Diagrams (\textsc{Pmdd}), denoted by \textsc{PmddC}, over \textsc{Smdd}. \textbf{RQ3} compares the GPU variant, denoted by \textsc{PmddG}, with \textsc{PmddC}, focusing on both runtime and the ability to solve instances within the prescribed resource limits.
+We aim to answer the following research questions.
+\begin{enumerate}
+    \item How does the best serial multiobjective DDs (\textsc{Smdd}) compare with the state-of-the-art MIP-based defining point algorithm (DPA)?
+    \item What speedup does the CPU variant of \textsc{Pmdd} (\textsc{PmddC}) achieve over \textsc{Smdd}?
+    \item Can GPU-based \textsc{Pmdd} (\textsc{PmddG}) outperform \textsc{PmddC}?
+\end{enumerate}
 
+% Our experimental setup and results are provided in \Cref{sec:setup} and \Cref{sec:results}, respectively. 
 \subsection{Computational Setup}
+\label{sec:setup}
 
-We conducted all experiments on a compute cluster equipped with an Intel Xeon 6972P CPU running at 2.4\,GHz and an NVIDIA H100 GPU. We imposed a one-hour time limit per instance, with memory limits of 16\,GB on the CPU and 20\,GB on the GPU. Our implementation builds on the C++ code of \citet{bergman2022network} and was compiled using C++14, OpenMP 4.5 for CPU parallelism, and NVCC 12.6 for GPU acceleration. We evaluate \textsc{PmddC} with 4, 8, and 16 threads, denoted by \textsc{PmddC}$(4)$, \textsc{PmddC}$(8)$, and \textsc{PmddC}$(16)$, respectively.
+We conducted all experiments on a cluster equipped with an Intel Xeon 6972P CPU running at 2.4\,GHz and an NVIDIA H100 GPU. We imposed a one-hour time limit per instance, with memory limits of 16\,GB on the CPU and 20\,GB on the GPU. Our implementation builds on the C++ code of \citet{bergman2022network} and was compiled using C++14, OpenMP 4.5 for CPU parallelism, and NVCC 12.6 for GPU acceleration. We evaluate \textsc{PmddC} with 4, 8, and 16 threads, denoted by \textsc{PmddC}$(t)$, where $t \in \{4,8,16\}$ denotes the number of threads. The \textsc{Smdd} baseline is based on the original implementation of \citet{bergman2022network}. This baseline applies their bidirectional enumeration algorithm \texttt{Coup}$^+$ to MOKP and \texttt{Coup} to MOSPP and MOTSP; the ``$+$'' indicates that pruning based on state dominance is enabled. The corresponding \textsc{PmddC} and \textsc{PmddG} experiments combine the parallel enumeration along with state-dominance pruning. As an additional baseline for \textsc{PmddG},  we report the performance of top-down enumeration on GPU (\textsc{PmddG-TD}). The DPA baseline is based on the implementation of \citet{dachert2024simple}; the two variants of this algorithm are referred to as DPA with augmented $\epsilon$-constraint (DPA-A) and DPA with two-stage (DPA-TS). The DPA was shown to outperform the criterion-space methods against which \textsc{Smdd} was previously evaluated, but these two lines of work have not been compared directly. Our comparison therefore evaluates whether DD-based enumeration remains competitive with this stronger MIP baseline.
 
-We consider the multiobjective knapsack problem (MOKP), multiobjective set packing problem (MOSPP), and multiobjective traveling salesperson problem (MOTSP), using the instances of \citet{bergman2022network}. Each problem setting contains 10 instances. We report settings for which the best serial bidirectional enumeration method of \citet{bergman2022network} required at least five seconds of total runtime.
-
-We use the original implementation of \citet{bergman2022network} as the serial baseline and denote it by \textsc{Smdd}. This baseline applies their bidirectional enumeration algorithm \texttt{Coup}$^+$ to MOKP and \texttt{Coup} to MOSPP and MOTSP; the ``$+$'' indicates that state-dominance pruning is enabled. The corresponding \textsc{PmddC} and \textsc{PmddG} experiments use the same enumeration and pruning configuration as \textsc{Smdd}. We additionally report the GPU top-down variant as \texttt{G-TD}. For the MIP comparison, we use the DPA-A and DPA-TS variants of \citet{dachert2024simple}. DPA was shown to outperform the criterion-space methods against which \textsc{Smdd} was previously evaluated, but these two lines of work have not been compared directly. Our comparison therefore evaluates whether DD-based enumeration remains competitive with this stronger MIP baseline.
-
-We report the arithmetic mean enumeration wall-clock time over the solved instances and the corresponding speedup relative to \textsc{Smdd}. The notation $S^{(M,T)}$ gives the number of solved instances $S$, with $M$ out-of-memory failures and $T$ timeouts; hence, $S+M+T=10$ for every problem setting. A dash indicates that no instance was solved.
+We use the benchmark instances provided in \citet{bergman2022network} for comparing different algorithms. Specifically, we test on the multiobjective knapsack problem (MOKP), set packing problem (MOSPP), and traveling salesperson problem (MOTSP). Each problem setting contains 10 instances. We focus on problem sizes for which \textsc{Smdd} required at least five seconds of total runtime. We report the arithmetic mean of enumeration wall-clock time over the solved instances and the corresponding speedup relative to \textsc{Smdd}. The notation $S^{(M,T)}$ gives the number of solved instances $S$, with $M$ out-of-memory failures and $T$ timeouts; hence, $S+M+T=10$ for every problem setting. A dash indicates that no instance was solved.
 
 \subsection{Results}
+\Cref{tab:combined_result_short} reports the mean enumeration times, speedups, and solved instances for all three problem families. The results are summarized below with respect to the research questions. The full set of results for all sizes of MOKP and MOSPP instances is provided in \Cref{app:additional_results}.
 
+\label{sec:results}
 \paragraph{RQ1 (\textsc{Smdd} vs. DPA).}
-\Cref{tab:combined_result_short} shows complementary performance regimes for DD- and MIP-based enumeration. \textsc{Smdd} is substantially more robust on MOKP and MOTSP: DPA solves only two MOKP instances for $(N,K)=(40,6)$ and none of the other reported MOKP settings, while both DPA variants time out on every reported MOTSP setting. In contrast, \textsc{Smdd} solves all MOKP instances with $N=40$ and all MOTSP instances with $K=4,5$. DPA is more effective on low-objective MOSPP settings, where DPA-A is faster than \textsc{Smdd} for $(150,3)$ and $(200,3)$ and solves all instances for $N=200$. This crossover reflects the different computational bottlenecks. DPA solves one MIP per nondominated point and therefore benefits when the final frontier is small, whereas DD enumeration is governed by the state-space representation and the sizes of the intermediate node frontiers. As the number of objectives increases, the growth of the final frontier makes DPA less robust, while \textsc{Smdd} continues to exploit shared state-space structure.
+\Cref{tab:combined_result_short} shows complementary performance regimes for DD- and MIP-based enumeration. \textsc{Smdd} is substantially more robust on MOKP and MOTSP. Specifically, DPA solves only two MOKP instances for $(n,m)=(40,6)$ and none of the other reported MOKP settings, while both DPA variants time out on every reported MOTSP setting. In contrast, \textsc{Smdd} solves all MOKP instances with $n=40$ and all MOTSP instances with $m\in \{4,5\}$. DPA is more effective on low-objective MOSPP settings, where DPA-A is faster than \textsc{Smdd} for $(150,3)$ and $(200,3)$ and solves all instances for $n=200$. 
+
+\citet{dachert2024simple} state that the number of solver calls is bounded by \(O(|\mathcal{Y}_N|^{\lfloor m/2\rfloor})\). This bound is linear in the final frontier size for two or three objectives. This allows DPA to perform well in low objective regime with a small PF, which is the case of MOSPP. 
+At the same time, the cardinality of states in the DD-based methods increase with the number of variables for the MOSPP, making it harder to solve larger instances.
+For other problems, as the number of objectives increase, the growth of the final frontier makes DPA less robust, while \textsc{Smdd} continues to exploit shared state-space structure. This behavior is consistent with the results of \citet{bergman2022network}.
 
 \paragraph{RQ2 (\textsc{Smdd} vs. \textsc{PmddC}).}
-\textsc{PmddC} consistently improves upon \textsc{Smdd}, although the speedup depends on the problem family and thread count. The best CPU speedups on the reported MOKP settings range from $1.80\times$ to $3.21\times$, with weaker scaling for the larger $N=70$ instances. On MOSPP, the maximum speedup ranges from $1.51\times$ for $(150,3)$ to $4.12\times$ for $(200,4)$. MOTSP benefits most from CPU parallelism: \textsc{PmddC}$(16)$ attains speedups of $7.83\times$ and $5.05\times$ for $K=4$ and $K=5$, respectively. Increasing the thread count is not uniformly beneficial, as illustrated by MOKP with $(N,K)=(70,7)$ and MOSPP with $(150,7)$. This behavior is consistent with the variation in node-frontier workloads and the cost of merging the worker-local cutset frontiers. Nevertheless, \textsc{PmddC} also improves robustness on several difficult settings by solving more instances than \textsc{Smdd}.
+\textsc{PmddC} provides a consistent overall improvement over \textsc{Smdd}, reducing enumeration time on nearly all reported configurations and solving more instances in several difficult settings. Performance generally improves as the number of threads increases, with 16 threads producing the best results in most cases. However, the gains are sublinear and begin to saturate in some settings, where additional threads provide little benefit or may slightly increase runtime. For instance, \textsc{PmddC}$(16)$ is slower than \textsc{PmddC}$(8)$ for the MOSPP instances with $(n, m) = (150, 7)$. This behavior is consistent with uneven node-frontier workloads and the overhead of scheduling parallel work and merging the worker-local cutset frontiers. The strongest scaling is observed on MOTSP, where \textsc{PmddC}$(16)$ achieves a speedup of up to $7.83\times$, while MOKP and MOSPP exhibit more moderate gains. Overall, CPU parallelization improves both the performance and robustness of DD enumeration, but with diminishing returns as the thread count increases.
 
 \paragraph{RQ3 (\textsc{PmddC} vs. \textsc{PmddG}).}
-\textsc{PmddG} provides the largest speedups when its intermediate frontiers fit in GPU memory. For MOKP with $N=40$, it attains speedups of $5.51\times$ and $9.71\times$, compared with at most $2.60\times$ and $3.21\times$ for \textsc{PmddC}. On MOSPP with $N=150$, \textsc{PmddG} reaches $2.44\times$ for $K=3$ and $10.98\times$ for $K=7$. It also outperforms the CPU configurations on the reported MOTSP settings, reaching $8.03\times$, $7.04\times$, $4.40\times$, and $1.94\times$ for $K=4,5,6,7$, respectively. The GPU is less robust when the DD and its intermediate frontiers exceed device memory: both GPU variants fail on the reported MOSPP instances with $N=200$, and memory failures also occur for larger MOKP and MOTSP settings. Candidate batching bounds the temporary storage used by an individual expansion, but the flattened DD and node frontiers must still reside in GPU memory. Thus, \textsc{PmddG} offers the strongest runtime performance on instances that fit in device memory, whereas \textsc{PmddC} degrades more gracefully as frontier sizes increase. Full results are provided in \Cref{app:additional_results}.
+\textsc{PmddG} provides the largest speedups when its intermediate frontiers fit in GPU memory. For MOKP with $N=40$, it attains speedups of $5.51\times$ and $9.71\times$, compared with at most $2.60\times$ and $3.21\times$ for \textsc{PmddC}. On MOSPP with $N=150$, \textsc{PmddG} reaches $2.44\times$ for $K=3$ and $10.98\times$ for $K=7$, with a caveat that it is only able to solve 9 instances in for the $(n,m)=(150,3)$ setting.
+It also outperforms the CPU configurations on the reported MOTSP settings, reaching $8.03\times$, $7.04\times$, $4.40\times$, and $1.94\times$ for $K=4,5,6,7$, respectively. 
+Also note that \textsc{PmddG} is able to solve 5 and 3 more instances than \textsc{Smdd} and \textsc{PmddC$(16)$}, respectively, for the MOTSP with $K=7$. \textsc{PmddG} is also faster than than \textsc{PmddG-TD} in most cases, which indicates that bidirectional enumeration is more effective than top-down enumeration on the GPU, similar to the CPU results reported by \citet{bergman2022network}.
+The GPU is less robust when the DD and its intermediate frontiers exceed device memory. For example, both GPU variants fail on the reported MOSPP instances with $N=200$. Candidate batching bounds the temporary storage used by an individual expansion, but the flattened DD and node frontiers must still reside in GPU memory. Thus, \textsc{PmddG} offers the strongest runtime performance on instances that fit in device memory, whereas \textsc{PmddC} degrades more gracefully as frontier sizes increase. 
 
 \begin{table*}[htbp!]
 \centering
 \scriptsize
 \renewcommand{\arraystretch}{0.97}
-\caption{Enumeration performance across problem families. Times are arithmetic means over solved instances, and speedups are relative to \textsc{Smdd}. Superscript ``$+$'' denotes the use of state-dominance pruning with \texttt{Coup}$^+$. Bold values indicate the fastest mean time for each setting. The entry $S^{(M,T)}$ reports solved instances, out-of-memory failures, and timeouts.}
+\caption{Enumeration performance across MOKP, MOSPP and MOTSP problems. ``Time(s)'' reports the arithmetic mean of enumeration time over solved instances, and speedups are relative to \textsc{Smdd}. Superscript ``$+$'' denotes the use of state-dominance pruning. Bold values indicate the fastest mean time for each setting. The entry $S^{(M,T)}$ reports solved instances, out-of-memory failures, and timeouts.}
 \resizebox{\textwidth}{!}{%
-\begin{tabular}{lrrlrrllrrlrrl}
+\begin{tabular}{lrrlrrrrrlrrrr}
 \toprule
-Problem & $N$ & $K$ & Method & Time (s) & Speedup & $S^{(M,T)}$ &
-$N$ & $K$ & Method & Time (s) & Speedup & $S^{(M,T)}$ \\
+Problem & $n$ & $m$ & Method & Time (s) & Speedup & $S^{(M,T)}$ &
+$n$ & $m$ & Method & Time (s) & Speedup & $S^{(M,T)}$ \\
 \midrule
 \multirow{16}{*}{MOKP} & \multirow{8}{*}{40} & \multirow{8}{*}{6} & DPA-TS & 1371 & 0.01$\times$ & $2^{(0, 8)}$ & \multirow{8}{*}{40} & \multirow{8}{*}{7} & DPA-TS & -- & -- & $0^{(0, 10)}$ \\
  &  &  & DPA-A & 1439 & 0.01$\times$ & $2^{(0, 8)}$ &  &  & DPA-A & -- & -- & $0^{(0, 10)}$ \\
@@ -548,7 +560,7 @@ $N$ & $K$ & Method & Time (s) & Speedup & $S^{(M,T)}$ \\
  &  &  & \textsc{PmddC}(4)$^+$ & 6 & 1.87$\times$ & $10$ &  &  & \textsc{PmddC}(4)$^+$ & 16 & 2.12$\times$ & $10$ \\
  &  &  & \textsc{PmddC}(8)$^+$ & 5 & 2.15$\times$ & $10$ &  &  & \textsc{PmddC}(8)$^+$ & 13 & 2.63$\times$ & $10$ \\
  &  &  & \textsc{PmddC}(16)$^+$ & 4 & 2.60$\times$ & $10$ &  &  & \textsc{PmddC}(16)$^+$ & 11 & 3.21$\times$ & $10$ \\
- &  &  & \texttt{G-TD} & 3 & 4.31$\times$ & $10$ &  &  & \texttt{G-TD} & 5 & 7.12$\times$ & $10$ \\
+ &  &  & \textsc{PmddG$^+$-TD} & 3 & 4.31$\times$ & $10$ &  &  & \textsc{PmddG$^+$-TD} & 5 & 7.12$\times$ & $10$ \\
  &  &  & \textsc{PmddG}$^+$ & \textbf{2} & 5.51$\times$ & $10$ &  &  & \textsc{PmddG}$^+$ & \textbf{4} & 9.71$\times$ & $10$ \\
 \cmidrule(lr){2-13}
  & \multirow{8}{*}{70} & \multirow{8}{*}{6} & DPA-TS & -- & -- & $0^{(0, 10)}$ & \multirow{8}{*}{70} & \multirow{8}{*}{7} & DPA-TS & -- & -- & $0^{(0, 10)}$ \\
@@ -557,7 +569,7 @@ $N$ & $K$ & Method & Time (s) & Speedup & $S^{(M,T)}$ \\
  &  &  & \textsc{PmddC}(4)$^+$ & 1326 & 1.17$\times$ & $7^{(0, 3)}$ &  &  & \textsc{PmddC}(4)$^+$ & 1391 & 1.19$\times$ & $4^{(0, 6)}$ \\
  &  &  & \textsc{PmddC}(8)$^+$ & 1008 & 1.54$\times$ & $7^{(0, 3)}$ &  &  & \textsc{PmddC}(8)$^+$ & 1757 & 0.94$\times$ & $6^{(0, 4)}$ \\
  &  &  & \textsc{PmddC}(16)$^+$ & 862 & 1.80$\times$ & $7^{(0, 3)}$ &  &  & \textsc{PmddC}(16)$^+$ & 1708 & 0.97$\times$ & $7^{(0, 3)}$ \\
- &  &  & \texttt{G-TD} & \textbf{335} & 4.63$\times$ & $6^{(4, 0)}$ &  &  & \texttt{G-TD} & \textbf{372} & 4.44$\times$ & $3^{(7, 0)}$ \\
+ &  &  & \textsc{PmddG-TD} & \textbf{335} & 4.63$\times$ & $6^{(4, 0)}$ &  &  & \textsc{PmddG-TD} & \textbf{372} & 4.44$\times$ & $3^{(7, 0)}$ \\
  &  &  & \textsc{PmddG}$^+$ & 1010 & 1.53$\times$ & $10$ &  &  & \textsc{PmddG}$^+$ & 907 & 1.82$\times$ & $6^{(3, 1)}$ \\
 \midrule
 \multirow{16}{*}{MOSPP} & \multirow{8}{*}{150} & \multirow{8}{*}{3} & DPA-TS & 11 & 1.12$\times$ & $10$ & \multirow{8}{*}{150} & \multirow{8}{*}{7} & DPA-TS & -- & -- & $0^{(0, 10)}$ \\
@@ -566,7 +578,7 @@ $N$ & $K$ & Method & Time (s) & Speedup & $S^{(M,T)}$ \\
  &  &  & \textsc{PmddC}(4) & 8 & 1.50$\times$ & $10$ &  &  & \textsc{PmddC}(4) & 84 & 2.20$\times$ & $10$ \\
  &  &  & \textsc{PmddC}(8) & 8 & 1.50$\times$ & $10$ &  &  & \textsc{PmddC}(8) & 71 & 2.61$\times$ & $10$ \\
  &  &  & \textsc{PmddC}(16) & 8 & 1.51$\times$ & $10$ &  &  & \textsc{PmddC}(16) & 96 & 1.91$\times$ & $10$  \\
- &  &  & \texttt{G-TD} & 7 & 1.80$\times$ & $10$ &  &  & \texttt{G-TD} & \textbf{9} & 20.88$\times$ & $10$  \\
+ &  &  & \textsc{PmddG-TD} & 7 & 1.80$\times$ & $10$ &  &  & \textsc{PmddG-TD} & \textbf{9} & 20.88$\times$ & $10$  \\
  &  &  & \textsc{PmddG} & \textbf{5} & 2.44$\times$ & $9^{(1, 0)}$ &  &  & \textsc{PmddG} & 17 & 10.98$\times$ & $10$ \\
 \cmidrule(lr){2-13}
  & \multirow{8}{*}{200} & \multirow{8}{*}{3} & DPA-TS & 32 & 5.15$\times$ & $10$ & \multirow{8}{*}{200} & \multirow{8}{*}{4} & DPA-TS & 913 & 0.20$\times$ & $10$\\
@@ -575,7 +587,7 @@ $N$ & $K$ & Method & Time (s) & Speedup & $S^{(M,T)}$ \\
  &  &  & \textsc{PmddC}(4) & 93 & 1.75$\times$ & $1^{(9, 0)}$ &  &  & \textsc{PmddC}(4) & 80 & 2.34$\times$ & $1^{(9, 0)}$\\
  &  &  & \textsc{PmddC}(8) & 87 & 1.86$\times$ & $1^{(9, 0)}$  &  &  & \textsc{PmddC}(8) & 63 & 2.97$\times$ & $1^{(9, 0)}$\\
  &  &  & \textsc{PmddC}(16) & 72 & 2.27$\times$ & $1^{(8, 1)}$ &  &  & \textsc{PmddC}(16) & \textbf{45} & 4.12$\times$ & $1^{(9, 0)}$\\
- &  &  & \texttt{G-TD} & -- & -- & $0^{(10, 0)}$  &  &  & \texttt{G-TD} & -- & -- & $0^{(10, 0)}$\\
+ &  &  & \textsc{PmddG-TD} & -- & -- & $0^{(10, 0)}$  &  &  & \textsc{PmddG-TD} & -- & -- & $0^{(10, 0)}$\\
  &  &  & \textsc{PmddG} & -- & -- & $0^{(10, 0)}$  & &  & \textsc{PmddG} & -- & -- & $0^{(10, 0)}$\\
 \midrule
 \multirow{16}{*}{MOTSP} & \multirow{8}{*}{15} & \multirow{8}{*}{4} & DPA-TS & -- & -- & $0^{(0, 10)}$ & \multirow{8}{*}{15} & \multirow{8}{*}{5} & DPA-TS & -- & -- & $0^{(0, 10)}$ \\
@@ -584,7 +596,7 @@ $N$ & $K$ & Method & Time (s) & Speedup & $S^{(M,T)}$ \\
  &  &  & \textsc{PmddC}(4) & 7 & 3.47$\times$ & $10$ &  &  & \textsc{PmddC}(4) & 115 & 2.92$\times$ & $10$ \\
  &  &  & \textsc{PmddC}(8) & 5 & 5.06$\times$ & $10$ &  &  & \textsc{PmddC}(8) & 82 & 4.11$\times$ & $10$ \\
  &  &  & \textsc{PmddC}(16) & 3 & 7.83$\times$ & $10$ &  &  & \textsc{PmddC}(16) & 67 & 5.05$\times$ & $10$ \\
- &  &  & \texttt{G-TD} & 3 & 7.50$\times$ & $10$ &  &  & \texttt{G-TD} & \textbf{36} & 9.44$\times$ & $9^{(1, 0)}$ \\
+ &  &  & \textsc{PmddG-TD} & 3 & 7.50$\times$ & $10$ &  &  & \textsc{PmddG-TD} & \textbf{36} & 9.44$\times$ & $9^{(1, 0)}$ \\
  &  &  & \textsc{PmddG} & \textbf{3} & 8.03$\times$ & $10$ &  &  & \textsc{PmddG} & 48 & 7.04$\times$ & $10$ \\
 \cmidrule(lr){2-13}
  & \multirow{8}{*}{15} & \multirow{8}{*}{6} & DPA-TS & -- & -- & $0^{(0, 10)}$ & \multirow{8}{*}{15} & \multirow{8}{*}{7} & DPA-TS & -- & -- & $0^{(0, 10)}$ \\
@@ -593,7 +605,7 @@ $N$ & $K$ & Method & Time (s) & Speedup & $S^{(M,T)}$ \\
  &  &  & \textsc{PmddC}(4) & 870 & 1.87$\times$ & $10$ &  &  & \textsc{PmddC}(4) & 2508 & 1.41$\times$ & $3^{(0, 7)}$ \\
  &  &  & \textsc{PmddC}(8) & 711 & 2.28$\times$ & $10$ &  &  & \textsc{PmddC}(8) & 2123 & 1.67$\times$ & $3^{(0, 7)}$ \\
  &  &  & \textsc{PmddC}(16) & 641 & 2.53$\times$ & $10$ &  &  & \textsc{PmddC}(16) & 1930 & 1.84$\times$ & $3^{(0, 7)}$ \\
- &  &  & \texttt{G-TD} & -- & -- & $0^{(10, 0)}$ &  &  & \texttt{G-TD} & -- & -- & $0^{(10, 0)}$ \\
+ &  &  & \textsc{PmddG-TD} & -- & -- & $0^{(10, 0)}$ &  &  & \textsc{PmddG-TD} & -- & -- & $0^{(10, 0)}$ \\
  &  &  & \textsc{PmddG} & \textbf{369} & 4.40$\times$ & $10$ &  &  & \textsc{PmddG} & \textbf{1828} & 1.94$\times$ & $6^{(3, 1)}$ \\
 \bottomrule
 \end{tabular}
@@ -602,110 +614,110 @@ $N$ & $K$ & Method & Time (s) & Speedup & $S^{(M,T)}$ \\
 \end{table*}
 
 
-\section{Computational Experiments}
-\label{sec:results}
-Our computational evaluation aims to answer the following key research questions:
-\begin{list}{\textbf{RQ\arabic{enumi}}}{%
-    \usecounter{enumi}
-    \setlength{\labelwidth}{2.5em}
-    \setlength{\labelsep}{0.5em}
-    \setlength{\leftmargin}{3.0em}
-    \setlength{\itemsep}{0.25em}
-    \setlength{\parsep}{0pt}
-}
-    \item \textbf{MIP vs. Serial DD:} How does serial DD-based Pareto frontier enumeration compare with MIP baselines in runtime and scalability?
-    \item \textbf{Serial DD vs. \textsc{PmddC}:} How much speedup does the parallel CPU DD implementation provide over serial DD?
-    \item \textbf{\textsc{PmddC} vs. \textsc{PmddG}:} How does the GPU DD implementation compare with the parallel CPU DD variant in runtime and robustness?
-\end{list}
+% \section{Computational Experiments}
+% \label{sec:results}
+% Our computational evaluation aims to answer the following key research questions:
+% \begin{list}{\textbf{RQ\arabic{enumi}}}{%
+%     \usecounter{enumi}
+%     \setlength{\labelwidth}{2.5em}
+%     \setlength{\labelsep}{0.5em}
+%     \setlength{\leftmargin}{3.0em}
+%     \setlength{\itemsep}{0.25em}
+%     \setlength{\parsep}{0pt}
+% }
+%     \item \textbf{MIP vs. Serial DD:} How does serial DD-based Pareto frontier enumeration compare with MIP baselines in runtime and scalability?
+%     \item \textbf{Serial DD vs. \textsc{PmddC}:} How much speedup does the parallel CPU DD implementation provide over serial DD?
+%     \item \textbf{\textsc{PmddC} vs. \textsc{PmddG}:} How does the GPU DD implementation compare with the parallel CPU DD variant in runtime and robustness?
+% \end{list}
 
-\subsection{Experimental Setup}
-We conducted all experiments on a compute cluster equipped with an Intel Xeon 6972P CPU running at 2.4\,GHz and an NVIDIA H100 GPU. Across all experiments, the CPU memory limit was set to 16\,GB and the GPU memory limit was set to 20\,GB, with a one-hour time limit per instance. Our parallel PF enumeration algorithms were implemented on top of the C++ code of \citet{bergman2022network}. Specifically, we used C++14 with OpenMP 4.5 for CPU parallelism and NVCC 12.6 for GPU acceleration.
+% \subsection{Experimental Setup}
+% We conducted all experiments on a compute cluster equipped with an Intel Xeon 6972P CPU running at 2.4\,GHz and an NVIDIA H100 GPU. Across all experiments, the CPU memory limit was set to 16\,GB and the GPU memory limit was set to 20\,GB, with a one-hour time limit per instance. Our parallel PF enumeration algorithms were implemented on top of the C++ code of \citet{bergman2022network}. Specifically, we used C++14 with OpenMP 4.5 for CPU parallelism and NVCC 12.6 for GPU acceleration.
 
-We evaluate the proposed methods on MOKP, MOSPP, and MOTSP. The test instances are taken from \citet{bergman2022network}. We report results for instance sizes on which their best method, namely bidirectional PF enumeration (reported as \texttt{Coup} or \texttt{Coup}$^+$), required at least 5 seconds of total runtime. For each instance size, the test set contains 10 instances.
+% We evaluate the proposed methods on MOKP, MOSPP, and MOTSP. The test instances are taken from \citet{bergman2022network}. We report results for instance sizes on which their best method, namely bidirectional PF enumeration (reported as \texttt{Coup} or \texttt{Coup}$^+$), required at least 5 seconds of total runtime. For each instance size, the test set contains 10 instances.
 
-\citet{bergman2022network} showed that serial bidirectional PF enumeration (\texttt{Coup}/\texttt{Coup}$^+$) outperforms the two prior criterion-space algorithms it was benchmarked against, \citet{kirlik2014new} and \citet{ozlen2014multi}. \citet{dachert2024simple} subsequently showed that their MIP-based defining point algorithm (DPA) outperforms both of these same methods, plus a third criterion-space baseline \citep{boland2017dcm}. Neither paper compares directly against the other's paradigm, so we benchmark our DD-based methods directly against DPA, rather than against the methods it has already superseded, to test whether DD-based enumeration remains competitive with the strongest available MIP-based approach. We denote the serial bidirectional PF enumeration method of \citet{bergman2022network} by \text{Coup} or \text{Coup}$^+$. The ``+'' suffix indicates that state-dominance-based label pruning is used in addition to bidirectional PF enumeration. To ensure a fair comparison, we use the implementation provided by \citet{bergman2022network}, rather than our modified implementation, which can also perform serial PF enumeration. We refer to the two variants of DPA as DPA-A and DPA-TS.
+% \citet{bergman2022network} showed that serial bidirectional PF enumeration (\texttt{Coup}/\texttt{Coup}$^+$) outperforms the two prior criterion-space algorithms it was benchmarked against, \citet{kirlik2014new} and \citet{ozlen2014multi}. \citet{dachert2024simple} subsequently showed that their MIP-based defining point algorithm (DPA) outperforms both of these same methods, plus a third criterion-space baseline \citep{boland2017dcm}. Neither paper compares directly against the other's paradigm, so we benchmark our DD-based methods directly against DPA, rather than against the methods it has already superseded, to test whether DD-based enumeration remains competitive with the strongest available MIP-based approach. We denote the serial bidirectional PF enumeration method of \citet{bergman2022network} by \text{Coup} or \text{Coup}$^+$. The ``+'' suffix indicates that state-dominance-based label pruning is used in addition to bidirectional PF enumeration. To ensure a fair comparison, we use the implementation provided by \citet{bergman2022network}, rather than our modified implementation, which can also perform serial PF enumeration. We refer to the two variants of DPA as DPA-A and DPA-TS.
 
-The CPU bidirectional PF enumeration variants are reported as \texttt{Coup-T} (or $\texttt{Coup}^+\texttt{-T}$), where \texttt{T} specifies the number of parallel threads. The GPU bidirectional PF enumeration variants are reported as \texttt{G-Coup} and \texttt{G-Coup}$^+$. We report the enumeration wall-clock time in seconds (``Time (s)''), the speed-up w.r.t.\ \texttt{Coup} or \texttt{Coup}$^+$, and the tuple ``(M, T)'', which gives the number of instances that failed due to out-of-memory errors (M) and time-out limits (T).
+% The CPU bidirectional PF enumeration variants are reported as \texttt{Coup-T} (or $\texttt{Coup}^+\texttt{-T}$), where \texttt{T} specifies the number of parallel threads. The GPU bidirectional PF enumeration variants are reported as \texttt{G-Coup} and \texttt{G-Coup}$^+$. We report the enumeration wall-clock time in seconds (``Time (s)''), the speed-up w.r.t.\ \texttt{Coup} or \texttt{Coup}$^+$, and the tuple ``(M, T)'', which gives the number of instances that failed due to out-of-memory errors (M) and time-out limits (T).
 
-\subsection{Results}
-\paragraph{RQ1 (MIP vs. Serial DD).}
-\Cref{tab:combined_result_short} shows that serial DD enumeration is substantially more robust than the DPA baselines on MOKP and MOTSP. On MOKP, DPA solves only two instances for $(N,K)=(40,6)$ and none of the remaining reported settings, whereas \texttt{Coup} solves all instances for $N=40$ and remains competitive on the larger $N=70$ settings. On MOTSP, both DPA variants time out on all reported settings, while \texttt{Coup} solves all instances for $K=4,5$, nine instances for $K=6$, and one instance for $K=7$. The MOSPP results are more mixed: DPA-A is faster than \texttt{Coup} for $(150,3)$ and $(200,3)$, and solves all instances where \texttt{Coup} encounters memory failures for $N=200$; however, DPA fails on the high-objective $(150,7)$ setting where \texttt{Coup} solves all instances. This crossover follows from how each method's cost scales. DPA solves for each nondominated point individually, so its cost scales with frontier cardinality, and MOSPP's frontier stays small at low $K$, exactly where DPA-A is fastest. DD-based enumeration instead scales with the size of the underlying state space and the intermediate labels it carries through that space. MOSPP's state space is large even at low $K$, so it generates far more intermediate labels than its small final frontier would suggest, which is what makes low-$K$ MOSPP comparatively hard for DD-based enumeration. As $K$ grows, this reverses, since the frontier itself grows large enough that solving one MIP per point becomes DPA's bottleneck, while DD-based enumeration continues to benefit from sharing structure across the state space. The two families thus fail in complementary regimes, trading off which quantity, state-space size or frontier cardinality, becomes the bottleneck as the number of objectives grows. This confirms that DD-based enumeration remains competitive with the strongest available MIP baseline, not merely with the older methods it has already superseded.
+% \subsection{Results}
+% \paragraph{RQ1 (MIP vs. Serial DD).}
+% \Cref{tab:combined_result_short} shows that serial DD enumeration is substantially more robust than the DPA baselines on MOKP and MOTSP. On MOKP, DPA solves only two instances for $(N,K)=(40,6)$ and none of the remaining reported settings, whereas \texttt{Coup} solves all instances for $N=40$ and remains competitive on the larger $N=70$ settings. On MOTSP, both DPA variants time out on all reported settings, while \texttt{Coup} solves all instances for $K=4,5$, nine instances for $K=6$, and one instance for $K=7$. The MOSPP results are more mixed: DPA-A is faster than \texttt{Coup} for $(150,3)$ and $(200,3)$, and solves all instances where \texttt{Coup} encounters memory failures for $N=200$; however, DPA fails on the high-objective $(150,7)$ setting where \texttt{Coup} solves all instances. This crossover follows from how each method's cost scales. DPA solves for each nondominated point individually, so its cost scales with frontier cardinality, and MOSPP's frontier stays small at low $K$, exactly where DPA-A is fastest. DD-based enumeration instead scales with the size of the underlying state space and the intermediate labels it carries through that space. MOSPP's state space is large even at low $K$, so it generates far more intermediate labels than its small final frontier would suggest, which is what makes low-$K$ MOSPP comparatively hard for DD-based enumeration. As $K$ grows, this reverses, since the frontier itself grows large enough that solving one MIP per point becomes DPA's bottleneck, while DD-based enumeration continues to benefit from sharing structure across the state space. The two families thus fail in complementary regimes, trading off which quantity, state-space size or frontier cardinality, becomes the bottleneck as the number of objectives grows. This confirms that DD-based enumeration remains competitive with the strongest available MIP baseline, not merely with the older methods it has already superseded.
 
-\paragraph{RQ2 (Serial DD vs. Parallel DD on CPU).}
-The CPU variants provide consistent but bounded speedups over serial DD enumeration. On MOKP, the best CPU speedups range from $1.80\times$ to $3.21\times$, with weaker scaling on the larger $N=70$ cases. On MOSPP, CPU speedups range from about $1.51\times$ on the easiest setting to $4.12\times$ for $(200,4)$. MOTSP benefits most from CPU parallelism: \texttt{Coup-16} reaches $7.83\times$ for $K=4$ and $5.05\times$ for $K=5$, while still improving over serial enumeration for $K=6,7$. The CPU variants also improve robustness in several harder settings, solving more instances than serial \texttt{Coup} on large MOKP and MOTSP cases.
+% \paragraph{RQ2 (Serial DD vs. Parallel DD on CPU).}
+% The CPU variants provide consistent but bounded speedups over serial DD enumeration. On MOKP, the best CPU speedups range from $1.80\times$ to $3.21\times$, with weaker scaling on the larger $N=70$ cases. On MOSPP, CPU speedups range from about $1.51\times$ on the easiest setting to $4.12\times$ for $(200,4)$. MOTSP benefits most from CPU parallelism: \texttt{Coup-16} reaches $7.83\times$ for $K=4$ and $5.05\times$ for $K=5$, while still improving over serial enumeration for $K=6,7$. The CPU variants also improve robustness in several harder settings, solving more instances than serial \texttt{Coup} on large MOKP and MOTSP cases.
 
-\paragraph{RQ3 (Parallel DD on CPU vs. GPU).}
-The GPU variants are often fastest when the intermediate frontiers fit in GPU memory, but they are less robust than the CPU variants. On MOKP, GPU methods dominate the small $N=40$ settings, with \texttt{G-Coup} reaching $5.51\times$ and $9.71\times$ speedups; for $N=70$, \texttt{G-TD} is fastest on solved instances but incurs GPU out-of-memory failures. On MOSPP, GPU performance is strong for $N=150$, including a $20.88\times$ speedup for \texttt{G-TD} at $(150,7)$, but both GPU variants fail due to memory on the reported $N=200$ settings. On MOTSP, GPU methods are competitive with or faster than the CPU variants, especially for $K=5,6$, but memory failures appear for \texttt{G-TD} at higher $K$ and for \texttt{G-Coup} at $K=7$. Overall, the GPU gives the largest speedups, while the parallel CPU variants are more reliable under the imposed memory limits. This gap in robustness follows partly from how the two implementations are structured: the GPU bounds each layer's candidate materialization to a fixed-size batch of nodes, applying dominance filtering between batches so that many candidates are discarded before the rest of the layer is expanded, but it also keeps separate flattened device-side representations for top-down and bottom-up traversal, which doubles its baseline GPU memory footprint before enumeration even starts. The CPU's node-owned frontier degrades more gracefully, since a large node increases one worker's execution time instead of exhausting a memory pool shared by all workers. Full tables for all reported instance sizes are provided in \Cref{app:additional_results}.
+% \paragraph{RQ3 (Parallel DD on CPU vs. GPU).}
+% The GPU variants are often fastest when the intermediate frontiers fit in GPU memory, but they are less robust than the CPU variants. On MOKP, GPU methods dominate the small $N=40$ settings, with \texttt{G-Coup} reaching $5.51\times$ and $9.71\times$ speedups; for $N=70$, \texttt{G-TD} is fastest on solved instances but incurs GPU out-of-memory failures. On MOSPP, GPU performance is strong for $N=150$, including a $20.88\times$ speedup for \texttt{G-TD} at $(150,7)$, but both GPU variants fail due to memory on the reported $N=200$ settings. On MOTSP, GPU methods are competitive with or faster than the CPU variants, especially for $K=5,6$, but memory failures appear for \texttt{G-TD} at higher $K$ and for \texttt{G-Coup} at $K=7$. Overall, the GPU gives the largest speedups, while the parallel CPU variants are more reliable under the imposed memory limits. This gap in robustness follows partly from how the two implementations are structured: the GPU bounds each layer's candidate materialization to a fixed-size batch of nodes, applying dominance filtering between batches so that many candidates are discarded before the rest of the layer is expanded, but it also keeps separate flattened device-side representations for top-down and bottom-up traversal, which doubles its baseline GPU memory footprint before enumeration even starts. The CPU's node-owned frontier degrades more gracefully, since a large node increases one worker's execution time instead of exhausting a memory pool shared by all workers. Full tables for all reported instance sizes are provided in \Cref{app:additional_results}.
 
-\begin{table*}[htbp!]
-\centering
-\scriptsize
-\renewcommand{\arraystretch}{0.97}
-\caption{Pareto Enumeration Runtime Comparison Across Problems and Enumeration Methods}
-\resizebox{\textwidth}{!}{%
-\begin{tabular}{lrrlrrllrrlrrl}
-\toprule
-Problem & N & K & Method & Time (s) & Speed-up & $S^{(M,T)}$ &
-N & K & Method & Time (s) & Speed-up & $S^{(M,T)}$ \\
-\midrule
-\multirow{16}{*}{MOKP} & \multirow{8}{*}{40} & \multirow{8}{*}{6} & DPA-TS & 1371 & 0.01$\times$ & $2^{(0, 8)}$ & \multirow{8}{*}{40} & \multirow{8}{*}{7} & DPA-TS & -- & -- & $0^{(0, 10)}$ \\
- &  &  & DPA-A & 1439 & 0.01$\times$ & $2^{(0, 8)}$ &  &  & DPA-A & -- & -- & $0^{(0, 10)}$ \\
- &  &  & Coup & 10 & 1.00$\times$ & $10$ &  &  & Coup & 33 & 1.00$\times$ & $10$ \\
- &  &  & \texttt{Coup-4} & 6 & 1.87$\times$ & $10$ &  &  & \texttt{Coup-4} & 16 & 2.12$\times$ & $10$ \\
- &  &  & \texttt{Coup-8} & 5 & 2.15$\times$ & $10$ &  &  & \texttt{Coup-8} & 13 & 2.63$\times$ & $10$ \\
- &  &  & \texttt{Coup-16} & 4 & 2.60$\times$ & $10$ &  &  & \texttt{Coup-16} & 11 & 3.21$\times$ & $10$ \\
- &  &  & \texttt{G-TD} & 3 & 4.31$\times$ & $10$ &  &  & \texttt{G-TD} & 5 & 7.12$\times$ & $10$ \\
- &  &  & \texttt{G-Coup} & \textbf{2} & 5.51$\times$ & $10$ &  &  & \texttt{G-Coup} & \textbf{4} & 9.71$\times$ & $10$ \\
-\cmidrule(lr){2-13}
- & \multirow{8}{*}{70} & \multirow{8}{*}{6} & DPA-TS & -- & -- & $0^{(0, 10)}$ & \multirow{8}{*}{70} & \multirow{8}{*}{7} & DPA-TS & -- & -- & $0^{(0, 10)}$ \\
- &  &  & DPA-A & -- & -- & $0^{(0, 10)}$ &  &  & DPA-A & -- & -- & $0^{(0, 10)}$ \\
- &  &  & Coup & 1549 & 1.00$\times$ & $5^{(0, 5)}$ &  &  & Coup & 1650 & 1.00$\times$ & $3^{(0, 7)}$ \\
- &  &  & \texttt{Coup-4} & 1326 & 1.17$\times$ & $7^{(0, 3)}$ &  &  & \texttt{Coup-4} & 1391 & 1.19$\times$ & $4^{(0, 6)}$ \\
- &  &  & \texttt{Coup-8} & 1008 & 1.54$\times$ & $7^{(0, 3)}$ &  &  & \texttt{Coup-8} & 1757 & 0.94$\times$ & $6^{(0, 4)}$ \\
- &  &  & \texttt{Coup-16} & 862 & 1.80$\times$ & $7^{(0, 3)}$ &  &  & \texttt{Coup-16} & 1708 & 0.97$\times$ & $7^{(0, 3)}$ \\
- &  &  & \texttt{G-TD} & \textbf{335} & 4.63$\times$ & $6^{(4, 0)}$ &  &  & \texttt{G-TD} & \textbf{372} & 4.44$\times$ & $3^{(7, 0)}$ \\
- &  &  & \texttt{G-Coup} & 1010 & 1.53$\times$ & $10$ &  &  & \texttt{G-Coup} & 907 & 1.82$\times$ & $6^{(3, 1)}$ \\
-\midrule
-\multirow{16}{*}{MOSPP} & \multirow{8}{*}{150} & \multirow{8}{*}{3} & DPA-TS & 11 & 1.12$\times$ & $10$ & \multirow{8}{*}{150} & \multirow{8}{*}{7} & DPA-TS & -- & -- & $0^{(0, 10)}$ \\
- &  &  & DPA-A & 8 & 1.59$\times$ & $10$ &  &  & DPA-A & -- & -- & $0^{(0, 10)}$ \\
- &  &  & Coup & 12 & 1.00$\times$ & $10$ &  &  & Coup & 184 & 1.00$\times$ & $10$ \\
- &  &  & \texttt{Coup-4} & 8 & 1.50$\times$ & $10$ &  &  & \texttt{Coup-4} & 84 & 2.20$\times$ & $10$ \\
- &  &  & \texttt{Coup-8} & 8 & 1.50$\times$ & $10$ &  &  & \texttt{Coup-8} & 71 & 2.61$\times$ & $10$ \\
- &  &  & \texttt{Coup-16} & 8 & 1.51$\times$ & $10$ &  &  & \texttt{Coup-16} & 96 & 1.91$\times$ & $10$  \\
- &  &  & \texttt{G-TD} & 7 & 1.80$\times$ & $10$ &  &  & \texttt{G-TD} & \textbf{9} & 20.88$\times$ & $10$  \\
- &  &  & \texttt{G-Coup} & \textbf{5} & 2.44$\times$ & $9^{(1, 0)}$ &  &  & \texttt{G-Coup} & 17 & 10.98$\times$ & $10$ \\
-\cmidrule(lr){2-13}
- & \multirow{8}{*}{200} & \multirow{8}{*}{3} & DPA-TS & 32 & 5.15$\times$ & $10$ & \multirow{8}{*}{200} & \multirow{8}{*}{4} & DPA-TS & 913 & 0.20$\times$ & $10$\\
- &  &  & DPA-A & \textbf{22} & 7.53$\times$ & $10$ &  &  & DPA-A & 793 & 0.23$\times$ & $10$\\
- &  &  & Coup & 162 & 1.00$\times$ & $1^{(9, 0)}$  &  &  & Coup & 186 & 1.00$\times$ & $1^{(9, 0)}$ \\
- &  &  & \texttt{Coup-4} & 93 & 1.75$\times$ & $1^{(9, 0)}$ &  &  & \texttt{Coup-4} & 80 & 2.34$\times$ & $1^{(9, 0)}$\\
- &  &  & \texttt{Coup-8} & 87 & 1.86$\times$ & $1^{(9, 0)}$  &  &  & \texttt{Coup-8} & 63 & 2.97$\times$ & $1^{(9, 0)}$\\
- &  &  & \texttt{Coup-16} & 72 & 2.27$\times$ & $1^{(8, 1)}$ &  &  &\texttt{Coup-16} & \textbf{45} & 4.12$\times$ & $1^{(9, 0)}$\\
- &  &  & \texttt{G-TD} & -- & -- & $0^{(10, 0)}$  &  &  & \texttt{G-TD} & -- & -- & $0^{(10, 0)}$\\
- &  &  & \texttt{G-Coup} & -- & -- & $0^{(10, 0)}$  & &  & \texttt{G-Coup} & -- & -- & $0^{(10, 0)}$\\
-\midrule
-\multirow{16}{*}{MOTSP} & \multirow{8}{*}{15} & \multirow{8}{*}{4} & DPA-TS & -- & -- & $0^{(0, 10)}$ & \multirow{8}{*}{15} & \multirow{8}{*}{5} & DPA-TS & -- & -- & $0^{(0, 10)}$ \\
- &  &  & DPA-A & -- & -- & $0^{(0, 10)}$ &  &  & DPA-A & -- & -- & $0^{(0, 10)}$ \\
- &  &  & Coup & 23 & 1.00$\times$ & $10$ &  &  & Coup & 335 & 1.00$\times$ & $10$ \\
- &  &  & \texttt{Coup-4} & 7 & 3.47$\times$ & $10$ &  &  & \texttt{Coup-4} & 115 & 2.92$\times$ & $10$ \\
- &  &  & \texttt{Coup-8} & 5 & 5.06$\times$ & $10$ &  &  & \texttt{Coup-8} & 82 & 4.11$\times$ & $10$ \\
- &  &  & \texttt{Coup-16} & 3 & 7.83$\times$ & $10$ &  &  & \texttt{Coup-16} & 67 & 5.05$\times$ & $10$ \\
- &  &  & \texttt{G-TD} & 3 & 7.50$\times$ & $10$ &  &  & \texttt{G-TD} & \textbf{36} & 9.44$\times$ & $9^{(1, 0)}$ \\
- &  &  & \texttt{G-Coup} & \textbf{3} & 8.03$\times$ & $10$ &  &  & \texttt{G-Coup} & 48 & 7.04$\times$ & $10$ \\
-\cmidrule(lr){2-13}
- & \multirow{8}{*}{15} & \multirow{8}{*}{6} & DPA-TS & -- & -- & $0^{(0, 10)}$ & \multirow{8}{*}{15} & \multirow{8}{*}{7} & DPA-TS & -- & -- & $0^{(0, 10)}$ \\
- &  &  & DPA-A & -- & -- & $0^{(0, 10)}$ &  &  & DPA-A & -- & -- & $0^{(0, 10)}$ \\
- &  &  & Coup & 1623 & 1.00$\times$ & $9^{(0, 1)}$ &  &  & Coup & 3544 & 1.00$\times$ & $1^{(0, 9)}$ \\
- &  &  & \texttt{Coup-4} & 870 & 1.87$\times$ & $10$ &  &  & \texttt{Coup-4} & 2508 & 1.41$\times$ & $3^{(0, 7)}$ \\
- &  &  & \texttt{Coup-8} & 711 & 2.28$\times$ & $10$ &  &  & \texttt{Coup-8} & 2123 & 1.67$\times$ & $3^{(0, 7)}$ \\
- &  &  & \texttt{Coup-16} & 641 & 2.53$\times$ & $10$ &  &  & \texttt{Coup-16} & 1930 & 1.84$\times$ & $3^{(0, 7)}$ \\
- &  &  & \texttt{G-TD} & -- & -- & $0^{(10, 0)}$ &  &  & \texttt{G-TD} & -- & -- & $0^{(10, 0)}$ \\
- &  &  & \texttt{G-Coup} & \textbf{369} & 4.40$\times$ & $10$ &  &  & \texttt{G-Coup} & \textbf{1828} & 1.94$\times$ & $6^{(3, 1)}$ \\
-\bottomrule
-\end{tabular}
-}
-\label{tab:combined_result_short}
-\end{table*}
+% \begin{table*}[htbp!]
+% \centering
+% \scriptsize
+% \renewcommand{\arraystretch}{0.97}
+% \caption{Pareto Enumeration Runtime Comparison Across Problems and Enumeration Methods}
+% \resizebox{\textwidth}{!}{%
+% \begin{tabular}{lrrlrrllrrlrrl}
+% \toprule
+% Problem & N & K & Method & Time (s) & Speed-up & $S^{(M,T)}$ &
+% N & K & Method & Time (s) & Speed-up & $S^{(M,T)}$ \\
+% \midrule
+% \multirow{16}{*}{MOKP} & \multirow{8}{*}{40} & \multirow{8}{*}{6} & DPA-TS & 1371 & 0.01$\times$ & $2^{(0, 8)}$ & \multirow{8}{*}{40} & \multirow{8}{*}{7} & DPA-TS & -- & -- & $0^{(0, 10)}$ \\
+%  &  &  & DPA-A & 1439 & 0.01$\times$ & $2^{(0, 8)}$ &  &  & DPA-A & -- & -- & $0^{(0, 10)}$ \\
+%  &  &  & Coup & 10 & 1.00$\times$ & $10$ &  &  & Coup & 33 & 1.00$\times$ & $10$ \\
+%  &  &  & \texttt{Coup-4} & 6 & 1.87$\times$ & $10$ &  &  & \texttt{Coup-4} & 16 & 2.12$\times$ & $10$ \\
+%  &  &  & \texttt{Coup-8} & 5 & 2.15$\times$ & $10$ &  &  & \texttt{Coup-8} & 13 & 2.63$\times$ & $10$ \\
+%  &  &  & \texttt{Coup-16} & 4 & 2.60$\times$ & $10$ &  &  & \texttt{Coup-16} & 11 & 3.21$\times$ & $10$ \\
+%  &  &  & \texttt{G-TD} & 3 & 4.31$\times$ & $10$ &  &  & \texttt{G-TD} & 5 & 7.12$\times$ & $10$ \\
+%  &  &  & \texttt{G-Coup} & \textbf{2} & 5.51$\times$ & $10$ &  &  & \texttt{G-Coup} & \textbf{4} & 9.71$\times$ & $10$ \\
+% \cmidrule(lr){2-13}
+%  & \multirow{8}{*}{70} & \multirow{8}{*}{6} & DPA-TS & -- & -- & $0^{(0, 10)}$ & \multirow{8}{*}{70} & \multirow{8}{*}{7} & DPA-TS & -- & -- & $0^{(0, 10)}$ \\
+%  &  &  & DPA-A & -- & -- & $0^{(0, 10)}$ &  &  & DPA-A & -- & -- & $0^{(0, 10)}$ \\
+%  &  &  & Coup & 1549 & 1.00$\times$ & $5^{(0, 5)}$ &  &  & Coup & 1650 & 1.00$\times$ & $3^{(0, 7)}$ \\
+%  &  &  & \texttt{Coup-4} & 1326 & 1.17$\times$ & $7^{(0, 3)}$ &  &  & \texttt{Coup-4} & 1391 & 1.19$\times$ & $4^{(0, 6)}$ \\
+%  &  &  & \texttt{Coup-8} & 1008 & 1.54$\times$ & $7^{(0, 3)}$ &  &  & \texttt{Coup-8} & 1757 & 0.94$\times$ & $6^{(0, 4)}$ \\
+%  &  &  & \texttt{Coup-16} & 862 & 1.80$\times$ & $7^{(0, 3)}$ &  &  & \texttt{Coup-16} & 1708 & 0.97$\times$ & $7^{(0, 3)}$ \\
+%  &  &  & \texttt{G-TD} & \textbf{335} & 4.63$\times$ & $6^{(4, 0)}$ &  &  & \texttt{G-TD} & \textbf{372} & 4.44$\times$ & $3^{(7, 0)}$ \\
+%  &  &  & \texttt{G-Coup} & 1010 & 1.53$\times$ & $10$ &  &  & \texttt{G-Coup} & 907 & 1.82$\times$ & $6^{(3, 1)}$ \\
+% \midrule
+% \multirow{16}{*}{MOSPP} & \multirow{8}{*}{150} & \multirow{8}{*}{3} & DPA-TS & 11 & 1.12$\times$ & $10$ & \multirow{8}{*}{150} & \multirow{8}{*}{7} & DPA-TS & -- & -- & $0^{(0, 10)}$ \\
+%  &  &  & DPA-A & 8 & 1.59$\times$ & $10$ &  &  & DPA-A & -- & -- & $0^{(0, 10)}$ \\
+%  &  &  & Coup & 12 & 1.00$\times$ & $10$ &  &  & Coup & 184 & 1.00$\times$ & $10$ \\
+%  &  &  & \texttt{Coup-4} & 8 & 1.50$\times$ & $10$ &  &  & \texttt{Coup-4} & 84 & 2.20$\times$ & $10$ \\
+%  &  &  & \texttt{Coup-8} & 8 & 1.50$\times$ & $10$ &  &  & \texttt{Coup-8} & 71 & 2.61$\times$ & $10$ \\
+%  &  &  & \texttt{Coup-16} & 8 & 1.51$\times$ & $10$ &  &  & \texttt{Coup-16} & 96 & 1.91$\times$ & $10$  \\
+%  &  &  & \texttt{G-TD} & 7 & 1.80$\times$ & $10$ &  &  & \texttt{G-TD} & \textbf{9} & 20.88$\times$ & $10$  \\
+%  &  &  & \texttt{G-Coup} & \textbf{5} & 2.44$\times$ & $9^{(1, 0)}$ &  &  & \texttt{G-Coup} & 17 & 10.98$\times$ & $10$ \\
+% \cmidrule(lr){2-13}
+%  & \multirow{8}{*}{200} & \multirow{8}{*}{3} & DPA-TS & 32 & 5.15$\times$ & $10$ & \multirow{8}{*}{200} & \multirow{8}{*}{4} & DPA-TS & 913 & 0.20$\times$ & $10$\\
+%  &  &  & DPA-A & \textbf{22} & 7.53$\times$ & $10$ &  &  & DPA-A & 793 & 0.23$\times$ & $10$\\
+%  &  &  & Coup & 162 & 1.00$\times$ & $1^{(9, 0)}$  &  &  & Coup & 186 & 1.00$\times$ & $1^{(9, 0)}$ \\
+%  &  &  & \texttt{Coup-4} & 93 & 1.75$\times$ & $1^{(9, 0)}$ &  &  & \texttt{Coup-4} & 80 & 2.34$\times$ & $1^{(9, 0)}$\\
+%  &  &  & \texttt{Coup-8} & 87 & 1.86$\times$ & $1^{(9, 0)}$  &  &  & \texttt{Coup-8} & 63 & 2.97$\times$ & $1^{(9, 0)}$\\
+%  &  &  & \texttt{Coup-16} & 72 & 2.27$\times$ & $1^{(8, 1)}$ &  &  &\texttt{Coup-16} & \textbf{45} & 4.12$\times$ & $1^{(9, 0)}$\\
+%  &  &  & \texttt{G-TD} & -- & -- & $0^{(10, 0)}$  &  &  & \texttt{G-TD} & -- & -- & $0^{(10, 0)}$\\
+%  &  &  & \texttt{G-Coup} & -- & -- & $0^{(10, 0)}$  & &  & \texttt{G-Coup} & -- & -- & $0^{(10, 0)}$\\
+% \midrule
+% \multirow{16}{*}{MOTSP} & \multirow{8}{*}{15} & \multirow{8}{*}{4} & DPA-TS & -- & -- & $0^{(0, 10)}$ & \multirow{8}{*}{15} & \multirow{8}{*}{5} & DPA-TS & -- & -- & $0^{(0, 10)}$ \\
+%  &  &  & DPA-A & -- & -- & $0^{(0, 10)}$ &  &  & DPA-A & -- & -- & $0^{(0, 10)}$ \\
+%  &  &  & Coup & 23 & 1.00$\times$ & $10$ &  &  & Coup & 335 & 1.00$\times$ & $10$ \\
+%  &  &  & \texttt{Coup-4} & 7 & 3.47$\times$ & $10$ &  &  & \texttt{Coup-4} & 115 & 2.92$\times$ & $10$ \\
+%  &  &  & \texttt{Coup-8} & 5 & 5.06$\times$ & $10$ &  &  & \texttt{Coup-8} & 82 & 4.11$\times$ & $10$ \\
+%  &  &  & \texttt{Coup-16} & 3 & 7.83$\times$ & $10$ &  &  & \texttt{Coup-16} & 67 & 5.05$\times$ & $10$ \\
+%  &  &  & \texttt{G-TD} & 3 & 7.50$\times$ & $10$ &  &  & \texttt{G-TD} & \textbf{36} & 9.44$\times$ & $9^{(1, 0)}$ \\
+%  &  &  & \texttt{G-Coup} & \textbf{3} & 8.03$\times$ & $10$ &  &  & \texttt{G-Coup} & 48 & 7.04$\times$ & $10$ \\
+% \cmidrule(lr){2-13}
+%  & \multirow{8}{*}{15} & \multirow{8}{*}{6} & DPA-TS & -- & -- & $0^{(0, 10)}$ & \multirow{8}{*}{15} & \multirow{8}{*}{7} & DPA-TS & -- & -- & $0^{(0, 10)}$ \\
+%  &  &  & DPA-A & -- & -- & $0^{(0, 10)}$ &  &  & DPA-A & -- & -- & $0^{(0, 10)}$ \\
+%  &  &  & Coup & 1623 & 1.00$\times$ & $9^{(0, 1)}$ &  &  & Coup & 3544 & 1.00$\times$ & $1^{(0, 9)}$ \\
+%  &  &  & \texttt{Coup-4} & 870 & 1.87$\times$ & $10$ &  &  & \texttt{Coup-4} & 2508 & 1.41$\times$ & $3^{(0, 7)}$ \\
+%  &  &  & \texttt{Coup-8} & 711 & 2.28$\times$ & $10$ &  &  & \texttt{Coup-8} & 2123 & 1.67$\times$ & $3^{(0, 7)}$ \\
+%  &  &  & \texttt{Coup-16} & 641 & 2.53$\times$ & $10$ &  &  & \texttt{Coup-16} & 1930 & 1.84$\times$ & $3^{(0, 7)}$ \\
+%  &  &  & \texttt{G-TD} & -- & -- & $0^{(10, 0)}$ &  &  & \texttt{G-TD} & -- & -- & $0^{(10, 0)}$ \\
+%  &  &  & \texttt{G-Coup} & \textbf{369} & 4.40$\times$ & $10$ &  &  & \texttt{G-Coup} & \textbf{1828} & 1.94$\times$ & $6^{(3, 1)}$ \\
+% \bottomrule
+% \end{tabular}
+% }
+% \label{tab:combined_result_short}
+% \end{table*}
 
 \section{Related Work}
 \label{sec:related}
@@ -783,7 +795,7 @@ GPUs are throughput-oriented processors that achieve high performance by executi
 
     % SM N
     \node[sm, right=0.25cm of dots] (smn) {};
-    \node[anchor=north, font=\bfseries, yshift=-0.1cm] at (smn.north) {SM $N$};
+    \node[anchor=north, font=\bfseries, yshift=-0.1cm] at (smn.north) {SM $n$};
     \node[mem, anchor=north, yshift=-0.7cm] (smemn) at (smn.north) {Shared Mem / L1};
 
     % SM N - Block 1
