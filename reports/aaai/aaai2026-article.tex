@@ -508,12 +508,7 @@ The candidate-then-filter ordering distinguishes the GPU backend from the CPU ba
 \section{Experiments}
 \label{sec:experiments}
 
-We aim to answer the following research questions.
-\begin{enumerate}
-    \item How does the best serial multiobjective DDs (\textsc{Smdd}) compare with the state-of-the-art MIP-based defining point algorithm (DPA)?
-    \item What speedup does the CPU variant of \textsc{Pmdd} (\textsc{PmddC}) achieve over \textsc{Smdd}?
-    \item Can GPU-based \textsc{Pmdd} (\textsc{PmddG}) outperform \textsc{PmddC}?
-\end{enumerate}
+We evaluate \textsc{Pmdd} by addressing three research questions. \textbf{RQ1:} How does exact serial DD-based enumeration \textsc{Smdd} compare with the MIP-based defining-point algorithm DPA in runtime and robustness? \textbf{RQ2:} To what extent does CPU parallelization in \textsc{PmddC} reduce enumeration time relative to \textsc{Smdd}, and how does its performance scale with the number of threads? \textbf{RQ3:} Under what conditions does the GPU variant \textsc{PmddG} outperform \textsc{PmddC}, and how does GPU memory affect its robustness?
 
 % Our experimental setup and results are provided in \Cref{sec:setup} and \Cref{sec:results}, respectively. 
 \subsection{Computational Setup}
