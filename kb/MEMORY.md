@@ -43,5 +43,5 @@ The active CUDA implementation uses dynamic one-dimensional block scheduling.
 - Removed user-selectable CUDA variants v1 and v2 from the active source implementation.
 - Removed the `kernel_version` argument from internal CUDA wrapper APIs; GPU calls now use v3 directly.
 - Removed the public `--kernel 3` and shorthand `gpu 3` compatibility forms in the later kernel-selection cleanup.
-- Updated GPU experiment generation so new `cc/cuMODD-gpu/table.dat` entries use `--backend gpu` without `--kernel 3`.
+- Updated GPU experiment generation so new `cc/PMDD-gpu/table.dat` entries use `--backend gpu` without `--kernel 3`.
 - CPU `--cpu-kernel 1|3` survived this earlier CUDA cleanup, then was removed in the later kernel-selection cleanup.

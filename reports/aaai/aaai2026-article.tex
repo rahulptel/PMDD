@@ -1,0 +1,973 @@
+\documentclass[letterpaper]{article}
+\usepackage[submission]{aaai2026}
+\usepackage{times}
+\usepackage{helvet}
+\usepackage{courier}
+\usepackage[hyphens]{url}
+\usepackage{graphicx}
+\urlstyle{rm}
+\def\UrlFont{\rm}
+\usepackage{natbib}
+\usepackage{caption}
+\usepackage{xcolor}
+\newcommand{\revE}[1]{\textcolor{red}{#1}}
+\frenchspacing
+\setlength{\pdfpagewidth}{8.5in}
+\setlength{\pdfpageheight}{11in}
+\pdfinfo{
+/TemplateVersion (2026.1)
+}
+\setcounter{secnumdepth}{2}
+
+\usepackage{algorithm}
+\usepackage[noend]{algpseudocode}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{longtable}
+\usepackage{booktabs}
+\usepackage{tikz}
+\usepackage[capitalize,noabbrev]{cleveref}
+\usetikzlibrary{positioning, fit, backgrounds, calc, decorations.pathreplacing}
+\usepackage{multirow}
+\usepackage{placeins}
+
+\title{Parallel Multiobjective Decision Diagrams} %TODO Please add
+
+\author{
+Rahul Patel\textsuperscript{},
+Elias B. Khalil\textsuperscript{}
+}
+\affiliations{
+Department of Mechanical and Industrial Engineering, University of Toronto, Canada\\
+rm.patel@mail.utoronto.ca, elias.khalil@utoronto.ca
+}
+
+\newcommand{\mink}{\oplus}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+Decision diagrams (DDs) can efficiently enumerate the exact Pareto frontier (PF) for multiobjective discrete optimization problems that admit a dynamic programming formulation.
+The filtering of dominated labels at each node of the DD is a key step during enumeration. Its computational complexity grows quadratically with the cardinality of the intermediate label sets.
+Furthermore, the filtering is performed serially by the existing algorithms, making it the primary bottleneck.
+%The Pareto dominance filtering at each node of the DD has a cost that grows quadratically in the size of the intermediate labels. 
+% Existing algorithms perform the filtering serially, leaving significant room for parallelization.
+In this work, we propose a parallelization scheme for DD-based PF enumeration to address this challenge.
+In particular, we propose \textsc{Pmdd} (Parallel Multiobjective Decision Diagrams), which not only parallelizes the dominance filtering but also the expansion, coupling and merging of label sets, tailored to both CPU and GPU.
+We evaluate our methods on benchmark instances of the multiobjective knapsack, set packing, and traveling salesperson problems, comparing against state-of-the-art MIP and serial DD approaches.
+We demonstrate that DD-based serial enumeration outperforms the MIP baseline in most cases.
+Furthermore, our CPU parallel variants achieve speedups of up to $7.83\times$ while GPU variants reach up to $20.88\times$ relative to serial enumeration, when intermediate frontiers fit in GPU memory.
+The code is available at \url{https://anonymous.4open.science/r/DD-C683/}.
+\end{abstract}
+
+\section{Introduction}
+\label{sec:intro}
+
+Many discrete optimization problems that arise in sustainability~\citep{flecker2022reducing}, finance~\citep{bonami2009exact}, healthcare~\citep{ehrgott2010mathematical}, routing~\citep{kovacs2015multi}, to name a few, are inherently multiobjective. In vehicle routing, for example, a dispatcher might need to balance the routing cost and service quality. As these goals conflict, no single plan is best in terms of cost and service quality at once. To compare different plans we use the principle of \emph{Pareto dominance}, where one solution dominates another if it matches it on every objective and improves on at least one. The goal of exact multiobjective optimization~\citep{ehrgott2005multicriteria,ehrgott2016exact,miettinen1999nonlinear} is to enumerate all nondominated solutions, i.e., the \emph{Pareto frontier} (PF), since each one represents a distinct trade-off a decision-maker might prefer over the rest. 
+
+% In this work, we focus on multiobjective discrete optimization (MODO) problems with linear objectives and constraints. Exact methods for these problems are conventionally built on top of an integer linear programming (ILP) solver and fall into two families~\citep{halffmann2022exact}. \emph{Decision-space} methods search the space of feasible assignments, extending single-objective branch-and-bound with dominance-based pruning, i.e., a node is discarded only when its bound set is dominated by the incumbent frontier. Their performance therefore rests on the quality of the bound sets, and weak bounds translate directly into more branching. They are also vulnerable to symmetry. Equivalent partial assignments appear as distinct subproblems, and branch-and-bound re-explores each of them unless the symmetry is broken explicitly. \emph{Objective-space} methods search the image of the feasible set instead. They repeatedly solve scalarized single-objective ILPs restricted to a region of the objective space, remove the region dominated by each new nondominated point, and recurse on what remains. The ILP solver is a black box here, called once per region, so the number of independent NP-hard solves grows with the size of the frontier and, sharply, with the number of objectives. Many of these solves are redundant, returning an already known nondominated point or reporting infeasibility.
+
+In this work, we consider multiobjective discrete optimization (MODO) problems with linear objectives and constraints. Exact methods are typically built on integer linear programming (ILP) solvers and fall into two families~\citep{halffmann2022exact}. \emph{Decision-space} methods extend single-objective branch-and-bound by pruning a node only when its bound set is dominated by the incumbent frontier. Their performance therefore depends critically on bound quality: weak bounds lead directly to additional branching. They are also susceptible to symmetry, since equivalent partial assignments are treated as distinct subproblems unless symmetry is explicitly broken. \emph{Objective-space} methods instead search the image of the feasible set. They repeatedly solve scalarized ILPs over restricted objective-space regions, remove regions dominated by newly discovered nondominated points, and recurse on the remainder. Because the ILP solver is invoked as a black box for each region, the number of independent NP-hard solves grows with the frontier size and, more sharply, with the number of objectives. Many such solves are redundant, either rediscovering known nondominated points or proving infeasibility.
+
+Decision diagrams (DDs) have recently emerged as an effective framework for single-objective discrete optimization~\citep{bergman2016decision}. A DD is a layered acyclic graph that compactly represents the feasible set of a problem with a dynamic programming (DP) formulation. Layers correspond to decision variables, nodes to DP states, and arcs to variable assignments, yielding a one-to-one correspondence between feasible solutions and root-to-terminal paths. By merging partial assignments that reach the same DP state, DDs collapse symmetric and equivalent subproblems rather than re-exploring them.
+
+% \citet{bergman2016multiobjective} extended the use of DDs to solve MODO problems. \citet{bergman2022network} further enhanced this method by incorporating advanced enumeration techniques and state-based label pruning operations. 
+% However, a DD by itself, however, does not make PF enumeration cheap. Every node stores a nondominated set of labels for the partial paths that reach it. Expanding a layer generates new candidate labels along outgoing arcs, merges them into each destination node's frontier, and discards the ones some other label dominates. This dominance filtering is the dominant cost: in the worst case it compares every candidate at a node against every other candidate, and label sets grow quickly with the number of objectives. Enumeration also works inward from both ends of the diagram, alternating between expanding forward from the root and backward from the terminal until the two meet at a shared middle layer, the \emph{cutset}, where the root-side and terminal-side frontiers are combined and filtered once more. Existing DD-based MODO solvers perform all of this one node and one comparison at a time.
+
+\citet{bergman2016multiobjective} extended DDs to MODO, and \citet{bergman2022network} strengthened the framework with improved enumeration and state-based label pruning. PF enumeration nevertheless remains expensive. Each node stores the nondominated labels of the partial paths reaching it. Layer expansion generates labels along outgoing arcs, merges them into destination frontiers, and removes dominated candidates. This dominance filtering is the main computational bottleneck: in the worst case, every candidate at a node is compared with every other, and label sets grow rapidly with the number of objectives. Enumeration proceeds from both ends of the diagram, alternating between forward expansion from the root and backward expansion from the terminal. The two searches meet at a middle layer, the \emph{cutset}, where their frontiers are combined and filtered again. Existing DD-based MODO solvers perform these operations sequentially, one node and one comparison at a time.
+This paper investigates the parallelization of exact DD-based PF enumeration. 
+% Although parallelism has been studied for single-objective DD search~\citep{bergman2014parallel,perez2018parallel,tardivo2024cp,tardivo2026complete}, PF enumeration exposes distinct opportunities for parallelism because it processes large sets of labels rather than a single scalar value. 
+% Computation can be parallelized across nodes during layer expansion, across labels during candidate generation and dominance filtering, and across nondominated sets during the final cutset merge. These levels of parallelism suit different architectures: multi-core CPUs support node-level work sharing and tree-based frontier reduction, while GPUs exploit finer-grained parallelism through flat candidate buffers and data-parallel filtering kernels.
+
+
+% We make the following contributions:
+% \begin{itemize}
+%     \item We identify where bidirectional PF enumeration decomposes for parallel execution: across nodes within a layer, across labels within a node, and across products and merges in the coupling phase.
+%     \item We build a CPU implementation that dynamically schedules node expansion over OpenMP threads and reduces cutset frontiers with a lock-free pairwise tree merge.
+%     \item We develop a GPU implementation that flattens the diagram into offset-indexed arc arrays, expands each layer with a four-kernel pipeline, and merges the cutset in memory-bounded batches against a running frontier.
+%     \item We evaluate on MOKP, MOSPP, and MOTSP instances with up to seven objectives against a state-of-the-art MIP baseline~\citep{dachert2024simple} and the state-of-the-art serial DD baseline~\citep{bergman2022network}, and show that our parallel CPU and GPU variants cut enumeration time relative to serial DD by up to $7.83\times$ and $20.88\times$ respectively, with the GPU fastest when frontiers fit in device memory and the CPU more reliable when they do not.
+% \end{itemize}
+We make the following contributions. We identify three sources of parallelism in bidirectional PF enumeration, namely node expansion within a layer, label processing within a node, and frontier products and merges during the coupling phase. We develop a CPU implementation that dynamically distributes node expansion across OpenMP threads and combines cutset frontiers using a lock-free pairwise reduction tree. We develop a GPU implementation that flattens the diagram into offset-indexed arc arrays, expands each layer through a four-stage pipeline, and merges the cutset in batches against a running frontier. We evaluate the proposed methods on multiobjective variants of knapsack, set packing and traveling salesperson instances. We compare them with a state-of-the-art MIP method~\citep{dachert2024simple} and a state-of-the-art serial DD method~\citep{bergman2022network}. Relative to the serial DD method, the CPU and GPU implementations reduce enumeration time by up to $7.83\times$ and $20.88\times$, respectively. The GPU performs best when the frontiers fit in device memory, while the CPU is more robust when they do not.
+
+% The remainder of this paper is organized as follows. \Cref{sec:prelim} provides background on MODO and DDs. \Cref{sec:method} describes the parallel enumeration methodology. \Cref{sec:results} presents the computational evaluation. \Cref{sec:related} reviews related work. \Cref{sec:conclusion} concludes the paper.
+
+\section{Background}
+\label{sec:prelim}
+\subsection{Multiobjective Discrete Optimization}
+\label{sec:prelim_modo}
+A MODO problem can be defined as the minimization of an $m$-dimensional objective vector function $\mathbf{f}(\mathbf{x}) = (f_1(\mathbf{x}), f_2(\mathbf{x}), \dots, f_m(\mathbf{x}))^\top$ subject to $\mathbf{x} \in \mathcal{X}$. Here, $\mathbf{x} = (x_1, x_2, \dots, x_n)^\top$ represents a vector of discrete decision variables, and $\mathcal{X} \subseteq \mathbb{Z}^n$ is the bounded, discrete feasible region. We compare different feasible solutions based on the principle of \emph{Pareto dominance}. For any two feasible solutions $\mathbf{x}^1, \mathbf{x}^2 \in \mathcal{X}$, the solution $\mathbf{x}^1$ is said to Pareto dominate $\mathbf{x}^2$, denoted by $\mathbf{f}(\mathbf{x}^1) \prec \mathbf{f}(\mathbf{x}^2)$, if $f_i(\mathbf{x}^1) \le f_i(\mathbf{x}^2)$ for all $i \in \{1, \dots, m\}$, and there exists at least one index $j \in \{1, \dots, m\}$ strictly satisfying $f_j(\mathbf{x}^1) < f_j(\mathbf{x}^2)$.
+An objective vector $\mathbf{y}^\star = \mathbf{f}(\mathbf{x}^\star)$ associated with a feasible solution $\mathbf{x}^\star \in \mathcal{X}$ is defined as a \emph{nondominated point} if there exists no other feasible solution $\mathbf{x} \in \mathcal{X}$ such that $\mathbf{f}(\mathbf{x}) \prec \mathbf{y}^\star$. The collection of all such nondominated points across the entire feasible region constitutes the PF. Mathematically, this frontier is expressed as $\mathcal{Y}_N = \{\mathbf{f}(\mathbf{x}) \mid \mathbf{x} \in \mathcal{X}, \nexists \, \mathbf{x}' \in \mathcal{X} \text{ such that } \mathbf{f}(\mathbf{x}') \prec \mathbf{f}(\mathbf{x})\}$. The primary goal of exact multiobjective optimization is to enumerate the PF.
+
+\begin{algorithm}[t!]
+\caption{Bidirectional PF Enumeration}
+\label{alg:bidir_pf}
+\begin{algorithmic}[1]
+\Require Exact decision diagram
+$\mathcal{D}=(\mathcal{N},\mathcal{A})$
+with layers $\mathcal{L}_1,\dots,\mathcal{L}_{n+1}$;
+balancing parameter $\lambda$
+\Statex For $\mathcal{S},\mathcal{T}\subseteq\mathbb{R}^m$, let
+$\mathcal{S}\oplus\mathcal{T}
+=\{\mathbf{s}+\mathbf{t}\mid
+\mathbf{s}\in\mathcal{S},\mathbf{t}\in\mathcal{T}\}$
+
+\Procedure{FilterDominated}{$\mathcal{Y}$}
+    \Comment{$\mathcal{O}(|\mathcal{Y}|^2)$}
+    \State \Return
+    $\{
+        \mathbf{y}\in\mathcal{Y}
+        \mid
+        \nexists\,\mathbf{y}'\in\mathcal{Y}
+        \text{ such that }
+        \mathbf{y}'\prec\mathbf{y}
+    \}$
+\EndProcedure
+
+\Procedure{ExpandLayer$_{\mathrm{CPU}}$}{$\mathcal{Y},j,d$}
+    \If{$d=\downarrow$}
+        \For{\textbf{each} node $v\in\mathcal{L}_j$}
+            \For{\textbf{each} incoming arc $a=(u,v)$}
+                \State
+                $\mathcal{Y}(v)
+                \gets
+                \mathcal{Y}(v)
+                \cup
+                \left(
+                    \mathcal{Y}(u)
+                    \oplus
+                    \{\mathbf{v}(a)\}
+                \right)$
+                \State
+                $\mathcal{Y}(v)
+                \gets
+                \Call{FilterDominated}{\mathcal{Y}(v)}$
+            \EndFor
+        \EndFor
+    \Else
+        \For{\textbf{each} node $u\in\mathcal{L}_j$}
+            \For{\textbf{each} outgoing arc $a=(u,v)$}
+                \State
+                $\mathcal{Y}(u)
+                \gets
+                \mathcal{Y}(u)
+                \cup
+                \left(
+                    \mathcal{Y}(v)
+                    \oplus
+                    \{\mathbf{v}(a)\}
+                \right)$
+                \State
+                $\mathcal{Y}(u)
+                \gets
+                \Call{FilterDominated}{\mathcal{Y}(u)}$
+            \EndFor
+        \EndFor
+    \EndIf
+    \State \Return $\mathcal{Y}$
+\EndProcedure
+
+\Procedure{Couple$_{\mathrm{CPU}}$}
+{$\mathcal{Y}^{\downarrow},
+ \mathcal{Y}^{\uparrow},
+ \mathcal{L}_c$}
+    \State $\mathcal{Y}_N\gets\emptyset$
+    \For{\textbf{each} node $u\in\mathcal{L}_c$}
+        \State
+        $\mathcal{Y}(u)
+        \gets
+        \mathcal{Y}^{\downarrow}(u)
+        \oplus
+        \mathcal{Y}^{\uparrow}(u)$
+        \State
+        $\mathcal{Y}_N
+        \gets
+        \Call{FilterDominated}
+        {\mathcal{Y}_N\cup\mathcal{Y}(u)}$
+    \EndFor
+    \State \Return $\mathcal{Y}_N$
+\EndProcedure
+
+\Procedure{BidirectionalEnum}{$\mathcal{D},\mathsf{B}$}
+    \State
+    $\mathcal{Y}^{\downarrow}(u)\gets\emptyset$ and
+    $\mathcal{Y}^{\uparrow}(u)\gets\emptyset$
+    for all $u\in\mathcal{N}$
+    \State
+    $\mathcal{Y}^{\downarrow}(\mathbf{r})\gets\{\mathbf{0}\}$,
+    $\mathcal{Y}^{\uparrow}(\mathbf{t})\gets\{\mathbf{0}\}$
+
+    \State
+    $i_{\mathrm{td}}\gets 1$,
+    $i_{\mathrm{bu}}\gets n+1$
+    \State
+    $s_{\mathrm{td}}\gets 0$,
+    $s_{\mathrm{bu}}\gets 0$
+
+    \While{$i_{\mathrm{td}}\neq i_{\mathrm{bu}}$}
+        \If{$s_{\mathrm{td}}\le s_{\mathrm{bu}}$}
+            \State $i_{\mathrm{td}}\gets i_{\mathrm{td}}+1$
+            \State
+            $\mathcal{Y}^{\downarrow}
+            \gets
+            \Call{ExpandLayer$_{\mathsf{B}}$}
+            {\mathcal{Y}^{\downarrow},
+             i_{\mathrm{td}},
+             \downarrow}$
+            \State
+            $s_{\mathrm{td}}
+            \gets
+            \Call{ComputeScore}
+            {\mathcal{Y}^{\downarrow},i_{\mathrm{td}}}$
+        \Else
+            \State $i_{\mathrm{bu}}\gets i_{\mathrm{bu}}-1$
+            \State
+            $\mathcal{Y}^{\uparrow}
+            \gets
+            \Call{ExpandLayer$_{\mathsf{B}}$}
+            {\mathcal{Y}^{\uparrow},
+             i_{\mathrm{bu}},
+             \uparrow}$
+            \State
+            $s_{\mathrm{bu}}
+            \gets
+            \lambda\cdot
+            \Call{ComputeScore}
+            {\mathcal{Y}^{\uparrow},i_{\mathrm{bu}}}$
+        \EndIf
+    \EndWhile
+
+    \State $c\gets i_{\mathrm{td}}$
+    \State \Return
+    \Call{Couple$_{\mathsf{B}}$}
+    {$\mathcal{Y}^{\downarrow},
+     \mathcal{Y}^{\uparrow},
+     \mathcal{L}_c$}
+\EndProcedure
+
+\State \Return
+\Call{BidirectionalEnum}{$\mathcal{D},\mathrm{CPU}$}
+\end{algorithmic}
+\end{algorithm}
+
+\subsection{Multiobjective Decision Diagrams}
+\label{sec:prelim_dd}
+
+A DD is a directed layered acyclic graph $\mathcal{D} = (\mathcal{N}, \mathcal{A})$ defined by a node set $\mathcal{N}$ and an arc set $\mathcal{A}$. The node set is partitioned into $n+1$ layers, $\mathcal{N} = \mathcal{L}_1 \cup \dots \cup \mathcal{L}_{n+1}$, corresponding to the sequence of the $n$ decision variables. The first layer $\mathcal{L}_1$ contains only the \emph{root node} $\mathbf{r}$, and the final layer $\mathcal{L}_{n+1}$ contains only the \emph{terminal node} $\mathbf{t}$.
+
+Each arc $a\in\mathcal{A}$ connects a node in $\mathcal{L}_j$ to a node in $\mathcal{L}_{j+1}$ and has an assignment value $d(a)\in\mathbb{Z}$ and an objective weight $\mathbf{v}(a)\in\mathbb{R}^m$. The assignment value specifies the value of $x_j$, while the objective weight gives the contribution of that transition to the objective vector. Consequently, a root-to-terminal path $p=(a_1,\dots,a_n)$ encodes the decision vector $\mathbf{x}(p)=(d(a_1),\dots,d(a_n))^\top$ and has value $\mathbf{v}(p)=\sum_{i=1}^n\mathbf{v}(a_i)$. Let $\mathcal{X}_{\mathcal{D}}=\{\mathbf{x}(p)\mid p\text{ is an }\mathbf{r}\text{-to-}\mathbf{t}\text{ path in }\mathcal{D}\}$ denote the solutions encoded by the diagram. The DD is \emph{exact} if $\mathcal{X}_{\mathcal{D}}=\mathcal{X}$ and $\mathbf{v}(p)=\mathbf{f}(\mathbf{x}(p))$ for every root-to-terminal path. Its objective image is then $\mathcal{Y}_{\mathcal{D}}=\{\mathbf{v}(p)\mid p\text{ is an }\mathbf{r}\text{-to-}\mathbf{t}\text{ path}\}$, and filtering the dominated vectors from $\mathcal{Y}_{\mathcal{D}}$ yields the exact PF $\mathcal{Y}_N$.
+
+During enumeration, each node $u$ stores nondominated objective vectors associated with partial paths. We denote the \emph{top-down node frontier} by $\mathcal{Y}^{\downarrow}(u)$, corresponding to paths from $\mathbf{r}$ to $u$, and the \emph{bottom-up node frontier} by $\mathcal{Y}^{\uparrow}(u)$, corresponding to paths from $u$ to $\mathbf{t}$. An objective vector in either set is called a \emph{label}. A generated label that has not passed dominance filtering is referred as a \emph{candidate label}. As defined in \Cref{alg:bidir_pf}, the Minkowski sum $\mathcal{S}\oplus\mathcal{T}$ contains every pairwise sum of a label in $\mathcal{S}$ and a label in $\mathcal{T}$. During coupling, a \emph{global frontier} stores the nondominated complete-path labels accumulated across cutset nodes.
+
+Algorithm~\ref{alg:bidir_pf} gives a detailed overview of the bidirectional PF enumeration. It initializes top-down and bottom-up frontiers at $\mathbf{r}$ and $\mathbf{t}$, respectively, and expands one direction at each iteration until the layer pointers meet at a cutset $\mathcal{L}_c$. The choice of hardware to run the enumeration is determined by the backend parameter $\mathsf{B}\in\{\mathrm{CPU},\mathrm{GPU}\}$, with shared initialization, direction-selection rule, and stopping condition. For the CPU backend, \textsc{ExpandLayer} assigns each node frontier to one worker, shifts the labels of each adjacent node by the corresponding arc weight, and filters the intermediate labels. Finally, \textsc{Couple} forms $\mathcal{Y}^{\downarrow}(u)\oplus\mathcal{Y}^{\uparrow}(u)$ for every $u\in\mathcal{L}_c$ and merges it into a running frontier by filtering dominated labels, resulting in the exact Pareto frontier $\mathcal{Y}_N$.
+
+\section{Parallel Pareto-Frontier Enumeration with Decision Diagrams}
+\label{sec:method}
+This section presents parallel CPU and GPU implementations of bidirectional PF enumeration. Both implementations preserve the algorithmic structure of \Cref{alg:bidir_pf}, including its initialization, layer-selection rule, and stopping condition, and differ only in how the underlying frontier operations are executed. 
+\Cref{sec:parallel_primitives} identifies the main sources of parallelism, while \Cref{sec:cpu_impl,sec:gpu_impl} describe how these operations are realized on the CPU and GPU, respectively.
+
+\subsection{Sources of Parallelism}
+\label{sec:parallel_primitives}
+
+The first source of parallelism is across nodes during \textsc{ExpandLayer}. Once the preceding top-down or bottom-up layer has been finalized, each node frontier in the selected layer depends only on read-only frontiers from the adjacent layer. The node-frontier updates are therefore independent. This coarse-grained decomposition is well suited to the CPU, where one worker can own a node frontier, scan its incident arcs, and filter the intermediate labels.
+
+The second source is within a node-frontier update. Each arc-label pair generates one candidate independently, and the pairwise dominance comparisons among candidates assigned to the same node can also be distributed. Exploiting this finer granularity requires explicit candidate buffers and offsets that assign disjoint output locations to workers. The GPU backend uses this decomposition to parallelize both candidate generation and dominance filtering.
+
+The third source arises in \textsc{Couple}. Each cutset node $u\in\mathcal{L}_c$ contributes the product set
+  \[
+      \mathcal{Y}^{\downarrow}(u) \oplus \mathcal{Y}^{\uparrow}(u)
+      =
+      \{\mathbf{y}^{\downarrow} + \mathbf{y}^{\uparrow}
+      \mid
+      \mathbf{y}^{\downarrow} \in \mathcal{Y}^{\downarrow}(u),
+      \mathbf{y}^{\uparrow} \in \mathcal{Y}^{\uparrow}(u)\}.
+  \]
+Product sets can be generated independently across cutset nodes and, within each node, across pairs of labels. The global Pareto frontier is then obtained by computing the nondominated union of these sets. We parallelize both stages, using backend-specific strategies for aggregating the resulting frontiers on the CPU and GPU.
+
+\subsection{CPU Parallelization}
+\label{sec:cpu_impl}
+
+The CPU backend parallelizes the node loops in \textsc{ExpandLayer}$_{\mathrm{CPU}}$ using OpenMP. We use dynamic scheduling to balance the workload across threads, since the cost of processing a node depends on both its number of incident arcs and the number of labels propagated through those arcs, which can differ substantially among nodes in the same layer.
+
+Each worker has exclusive ownership of its assigned node frontier. It processes the incident arcs sequentially, shifts the adjacent labels by each arc weight, and incrementally merges and filters the resulting candidates. No other worker mutates that frontier, so node-frontier updates require no locks. This design does not subdivide a single node frontier: a node with substantially more labels than the others remains serial within one worker.
+
+The \textsc{Couple}$_{\mathrm{CPU}}$ assigns cutset nodes dynamically to workers. Each worker builds a private frontier by combining $\mathcal{Y}^{\downarrow}(u)$ and $\mathcal{Y}^{\uparrow}(u)$ for its assigned nodes. The private frontiers are then merged by the pairwise tree reduction in \Cref{app:cpu_implementation}, \Cref{alg:cpu_tree_reduction}. This exposes parallelism in the final reduction while keeping all intermediate frontier updates local to a worker.
+
+\subsection{GPU Parallelization}
+\label{sec:gpu_impl}
+
+Algorithm~\ref{alg:gpu_bidir_pf} presents the GPU parallelization of bidirectional PF enumeration. The DD is first converted into a flat representation suitable for GPU processing, after which layer expansion and cutset coupling are performed by \textsc{ExpandLayer}$_{\mathrm{GPU}}$ and \textsc{Couple}$_{\mathrm{GPU}}$, respectively.
+Unlike the CPU implementation, the GPU materializes candidates in flat buffers and applies data-parallel filtering and compaction. 
+% The candidate batch limit $B_{\max}^{\mathrm{cand}}$ bounds the temporary storage used during layer expansion, while the product batch limit $B_{\max}^{\mathrm{prod}}$ controls the cutset products materialized at once.
+
+
+\begin{algorithm}[t!]
+\caption{GPU-based Bidirectional PF Enumeration}
+\label{alg:gpu_bidir_pf}
+\begin{algorithmic}[1]
+\Require Exact decision diagram
+$\mathcal{D}=(\mathcal{N},\mathcal{A})$;
+candidate batch limit $B_{\max}^{\mathrm{cand}}$;
+cutset-product batch limit $B_{\max}^{\mathrm{prod}}$
+
+\Procedure{FlattenDD}{$\mathcal{D}$}
+    \For{$j=1$ \textbf{to} $n+1$}
+        \State Pack the incoming arcs of $\mathcal{L}_j$ into
+        $(b_j^{\downarrow},
+          \mathbf{v}_j^{\downarrow},
+          \phi_j^{a,\downarrow})$
+        \State Pack the outgoing arcs of $\mathcal{L}_j$ into
+        $(b_j^{\uparrow},
+          \mathbf{v}_j^{\uparrow},
+          \phi_j^{a,\uparrow})$
+        \State Pack the node degrees
+        $\delta_j^{\mathrm{out}}$ and
+        $\delta_j^{\mathrm{in}}$
+    \EndFor
+    \State Transfer flattened arrays to GPU global memory
+\EndProcedure
+
+\Procedure{ExpandLayer$_{\mathrm{GPU}}$}{$\mathcal{Y},j,d$}
+    \If{$d=\downarrow$}
+        \State
+        $(b,\mathbf{v},\phi^a)
+        \gets
+        (b_j^{\downarrow},
+         \mathbf{v}_j^{\downarrow},
+         \phi_j^{a,\downarrow})$
+    \Else
+        \State
+        $(b,\mathbf{v},\phi^a)
+        \gets
+        (b_j^{\uparrow},
+         \mathbf{v}_j^{\uparrow},
+         \phi_j^{a,\uparrow})$
+    \EndIf
+
+    \State
+    $(\kappa,\phi^c,\Gamma)
+    \gets
+    \Call{ComputeArcOffsets}
+    {\mathcal{Y},b,\phi^a}$
+
+    \State
+    Partition $\mathcal{L}_j$ into batches with target
+    $B_{\max}^{\mathrm{cand}}$
+
+    \State
+    $\mathcal{Y}^{\mathrm{next}}\gets\emptyset$
+
+    \For{\textbf{each} candidate batch $\mathcal{Q}$}
+        \State Restrict
+        $(b,\mathbf{v},\phi^c,\kappa,\Gamma)$
+        to $\mathcal{Q}$
+
+        \State
+        $\beta_{\mathcal{Q}}
+        \gets
+        \Call{ExpandCandidates}
+        {\mathcal{Y},b,\mathbf{v},\phi^c,\kappa}$
+
+        \State
+        $\sigma_{\mathcal{Q}}
+        \gets
+        \Call{FilterDominated}
+        {\beta_{\mathcal{Q}},\Gamma}$
+
+        \State
+        $\mathcal{Y}_{\mathcal{Q}}
+        \gets
+        \Call{CompactSurvivors}
+        {\beta_{\mathcal{Q}},\sigma_{\mathcal{Q}}}$
+
+        \State
+        $\mathcal{Y}^{\mathrm{next}}
+        \gets
+        \mathcal{Y}^{\mathrm{next}}\cup
+        \mathcal{Y}_{\mathcal{Q}}$
+    \EndFor
+
+    \State \Return $\mathcal{Y}^{\mathrm{next}}$
+\EndProcedure
+
+\Procedure{Couple$_{\mathrm{GPU}}$}
+{$\mathcal{Y}^{\downarrow},
+ \mathcal{Y}^{\uparrow},
+ \mathcal{L}_c$}
+
+    \State
+    $\kappa_v^{\downarrow}
+    \gets
+    |\mathcal{Y}^{\downarrow}(v)|$
+    and
+    $\kappa_v^{\uparrow}
+    \gets
+    |\mathcal{Y}^{\uparrow}(v)|$
+    for all $v\in\mathcal{L}_c$
+
+    \State
+    $\mathcal{V}_c^*
+    \gets
+    \{
+        v\in\mathcal{L}_c
+        \mid
+        \kappa_v^{\downarrow}>0
+        \text{ and }
+        \kappa_v^{\uparrow}>0
+    \}$    
+
+    \State
+    $\operatorname{score}(v)
+    \gets
+    \kappa_v^{\downarrow}
+    +
+    \kappa_v^{\uparrow}$
+    for all $v\in\mathcal{V}_c^*$
+
+    \State
+    Sort $\mathcal{V}_c^*$ in descending order of
+    $\operatorname{score}(v)$
+
+    \State
+    $\mathcal{Y}^{\mathrm{global}}\gets\emptyset$
+    
+    \State
+    Partition $\mathcal{V}_c^*$ into batches with target
+    $B_{\max}^{\mathrm{prod}}$        
+
+    \For{\textbf{each} batch $\mathcal{B}$}
+        \State
+        $\beta
+        \gets
+        \Call{MaterializeProducts}
+        {\mathcal{B}}$
+
+        \If{$\mathcal{Y}^{\mathrm{global}}\neq\emptyset$}
+            \State
+            $\sigma
+            \gets
+            \Call{FilterAgainst}
+            {\beta,\mathcal{Y}^{\mathrm{global}}}$
+
+            \State
+            $\beta
+            \gets
+            \Call{CompactSurvivors}
+            {\beta,\sigma}$
+        \EndIf
+
+        \State
+        $\beta
+        \gets
+        \Call{SelfPrune}{\beta}$
+
+        \State
+        $\mathcal{Y}^{\mathrm{global}}
+        \gets
+        \Call{MergeFrontiers}
+        {\mathcal{Y}^{\mathrm{global}},\beta}$        
+    \EndFor
+
+    \State \Return $\mathcal{Y}^{\mathrm{global}}$
+\EndProcedure
+
+\State \Call{FlattenDD}{$\mathcal{D}$}
+\State \Return
+\Call{BidirectionalEnum}{$\mathcal{D},\mathrm{GPU}$}
+\end{algorithmic}
+\end{algorithm}
+
+For each layer $j$ and traversal direction $d\in\{\downarrow,\uparrow\}$, the flattened representation stores the adjacent-node indices $b_j^d$, the corresponding arc weights $\mathbf{v}_j^d$, and the per-node arc offsets $\phi_j^{a,d}$, together with the node degrees $\delta_j^{\mathrm{in}}$ and $\delta_j^{\mathrm{out}}$. These arrays are constructed once and reused throughout enumeration. In particular, the offsets $\phi_j^{a,d}$ organize the arcs incident to each node into contiguous segments, allowing each layer expansion to operate on contiguous regions of the arc and candidate arrays.
+
+For a selected layer, \textsc{ExpandLayer}$_{\mathrm{GPU}}$ partitions consecutive destination nodes into batches targeting at most $B_{\max}^{\mathrm{cand}}$ candidates. A node is not divided across batches; hence, a singleton batch may exceed this target when $\Gamma_v>B_{\max}^{\mathrm{cand}}$. The number of candidates materialized in one batch is therefore at most $\max\{B_{\max}^{\mathrm{cand}},\max_v\Gamma_v\}$. Within each batch $\mathcal{Q}$, it calls the four subroutines detailed in \Cref{app:gpu_implementation}, \Cref{alg:compute_arc_offsets,alg:expand_candidates,alg:dynamic_1D_kernel,alg:compact_survivors}. 
+% The dataflow is
+% \[
+%     \mathcal{Y}
+%     \rightarrow (\kappa,\phi^c,\Gamma)
+%     \rightarrow \beta_{\mathcal{Q}}
+%     \rightarrow \sigma_{\mathcal{Q}}
+%     \rightarrow \mathcal{Y}^{\mathrm{next}}(\mathcal{Q}).
+% \]
+Here $\kappa_a$ is the number of candidates generated by arc $a$, $\phi^c_a$ is the starting offset of that arc in the candidate buffer, and $\Gamma_v$ is the number of candidates assigned to node $v$. The buffer $\beta_{\mathcal{Q}}$ stores the candidates for batch $\mathcal{Q}$, and $\sigma_{\mathcal{Q}}$ marks those that survive dominance filtering.
+
+First, \Cref{alg:compute_arc_offsets} counts the candidates generated by each arc and uses a prefix sum to assign disjoint output segments. Second, \Cref{alg:expand_candidates} materializes the shifted labels for the current batch. Candidates generated by different arcs occupy disjoint memory, while candidates assigned to the same node form one contiguous segment. Third, \Cref{alg:dynamic_1D_kernel} filters each node segment using a load-balanced grid of thread blocks, assigning more blocks to larger segments. Fourth, \Cref{alg:compact_survivors} compacts the surviving labels into the next node-frontier representation.
+
+The candidate-then-filter ordering distinguishes the GPU backend from the CPU backend. A CPU worker can incrementally insert candidates into the frontier it owns. On the GPU, however, each insertion would depend on the current retained set and would therefore serialize updates to a shared node frontier. Materializing a batch first removes this dependency from candidate generation and exposes the dominance comparisons in the subsequent filtering stage. The resulting parallelism requires temporary candidate storage. The target $B_{\max}^{\mathrm{cand}}$ controls this storage across nodes but is not a hard bound when one node alone exceeds the target; persistent node frontiers and DD arrays also remain resident in device memory.
+
+\textsc{Couple}$_{\mathrm{GPU}}$ in \Cref{alg:gpu_bidir_pf} uses a separate schedule. It sorts the nodes in descending order of the sum of their frontier cardinalities, and partitions them into batches targeting at most $B_{\max}^{\mathrm{prod}}$ products. Since the product of one node is not divided, a singleton batch may exceed this target; the number of products materialized in one batch is at most $\max\{B_{\max}^{\mathrm{prod}},\max_v \kappa_v^{\downarrow}\kappa_v^{\uparrow}\}$. For each batch, \Cref{alg:materialize_cutset_products} materializes the pairwise sums, which are filtered against the current global frontier, self-pruned, and merged into that frontier. Unlike the CPU backend, the GPU therefore uses a batched running-frontier merge rather than a tree reduction. Batching does not change the result. After each batch, the global frontier is the nondominated union of all cutset products processed so far. Filtering a new batch against this frontier removes labels dominated by earlier batches, while the subsequent merge removes earlier labels dominated by the new survivors. The final set is therefore the same nondominated union over all active cutset nodes.
+
+
+\section{Experiments}
+\label{sec:experiments}
+
+We evaluate \textsc{Pmdd} by addressing three research questions. \textbf{RQ1:} How does exact serial DD-based enumeration \textsc{Smdd} compare with the MIP-based defining-point algorithm DPA in runtime and robustness? \textbf{RQ2:} To what extent does CPU parallelization in \textsc{PmddC} reduce enumeration time relative to \textsc{Smdd}, and how does its performance scale with the number of threads? \textbf{RQ3:} Under what conditions does the GPU variant \textsc{PmddG} outperform \textsc{PmddC}, and how does GPU memory affect its robustness?
+
+\subsection{Computational Setup}
+\label{sec:setup}
+
+We conducted all experiments on a cluster equipped with an Intel Xeon 6972P CPU running at 2.4\,GHz and an NVIDIA H100 GPU. We imposed a one-hour time limit per instance, with memory limits of 16\,GB on the CPU and 20\,GB on the GPU. Our implementation builds on the C++ code of \citet{bergman2022network} and was compiled using C++14, OpenMP 4.5 for CPU parallelism, and NVCC 12.6 for GPU acceleration. Following \citet{bergman2022network}, we set the balancing parameter in Algorithm~\ref{alg:bidir_pf} to $\lambda=1.5$. We evaluate \textsc{PmddC} with 4, 8, and 16 threads, denoted by \textsc{PmddC}$(t)$, where $t \in \{4,8,16\}$ denotes the number of threads. The \textsc{Smdd} baseline is based on the original implementation of \citet{bergman2022network}. This baseline applies their bidirectional enumeration algorithm \texttt{Coup}$^+$ to MOKP and \texttt{Coup} to MOSPP and MOTSP; the ``$+$'' indicates that pruning based on state dominance is enabled. The corresponding \textsc{PmddC} and \textsc{PmddG} experiments combine the parallel enumeration along with state-dominance pruning. As an additional baseline for \textsc{PmddG},  we report the performance of top-down enumeration on GPU (\textsc{PmddG-TD}). The DPA baseline is based on the implementation of \citet{dachert2024simple}; the two variants of this algorithm are referred to as DPA with augmented $\epsilon$-constraint (DPA-A) and DPA with two-stage (DPA-TS). The DPA was shown to outperform the criterion-space methods against which \textsc{Smdd} was previously evaluated, but these two lines of work have not been compared directly. Our comparison therefore evaluates whether DD-based enumeration remains competitive with this stronger MIP baseline.
+
+We use the benchmark instances provided in \citet{bergman2022network} for comparing different algorithms. Specifically, we test on the multiobjective knapsack problem (MOKP), set packing problem (MOSPP), and traveling salesperson problem (MOTSP). Each problem setting contains 10 instances. We focus on problem sizes for which \textsc{Smdd} required at least five seconds of total runtime. We report the arithmetic mean of enumeration wall-clock time over the solved instances and the corresponding speedup relative to \textsc{Smdd}. The notation $S^{(M,T)}$ gives the number of solved instances $S$, with $M$ out-of-memory failures and $T$ timeouts; hence, $S+M+T=10$ for every problem setting. A dash indicates that no instance was solved.
+
+\subsection{Results}
+\Cref{tab:combined_result_short} reports the mean enumeration times, speedups, and solved instances for all three problem families. The results are summarized below with respect to the research questions. The full set of results for all sizes of MOKP and MOSPP instances is provided in \Cref{app:additional_results}.
+
+\label{sec:results}
+\paragraph{RQ1 (\textsc{Smdd} vs. DPA).}
+\Cref{tab:combined_result_short} shows complementary performance regimes for DD- and MIP-based enumeration. \textsc{Smdd} is substantially more robust on MOKP and MOTSP. Specifically, DPA solves only two MOKP instances for $(n,m)=(40,6)$ and none of the other reported MOKP settings, while both DPA variants time out on every reported MOTSP setting. In contrast, \textsc{Smdd} solves all MOKP instances with $n=40$ and all MOTSP instances with $m\in \{4,5\}$. DPA is more effective on low-objective MOSPP settings, where DPA-A is faster than \textsc{Smdd} for $(150,3)$ and $(200,3)$ and solves all instances for $n=200$. 
+
+\citet{dachert2024simple} state that the number of solver calls is bounded by \(O(|\mathcal{Y}_N|^{\lfloor m/2\rfloor})\). This bound is linear in the final frontier size for two or three objectives. This allows DPA to perform well in low objective regime with a small PF, which is the case of MOSPP. 
+At the same time, the cardinality of states in the DD-based methods increase with the number of variables for the MOSPP, making it harder to solve larger instances.
+For other problems, as the number of objectives increase, the growth of the final frontier makes DPA less robust, while \textsc{Smdd} continues to exploit shared state-space structure. This behavior is consistent with the results of \citet{bergman2022network}.
+
+\paragraph{RQ2 (\textsc{Smdd} vs. \textsc{PmddC}).}
+\textsc{PmddC} provides a consistent overall improvement over \textsc{Smdd}, reducing enumeration time on nearly all reported configurations and solving more instances in several difficult settings. Performance generally improves as the number of threads increases, with 16 threads producing the best results in most cases. However, the gains are sublinear and begin to saturate in some settings, where additional threads provide little benefit or may slightly increase runtime. For instance, \textsc{PmddC}$(16)$ is slower than \textsc{PmddC}$(8)$ for the MOSPP instances with $(n, m) = (150, 7)$. This behavior is consistent with uneven node-frontier workloads and the overhead of scheduling parallel work and merging the worker-local cutset frontiers. The strongest scaling is observed on MOTSP, where \textsc{PmddC}$(16)$ achieves a speedup of up to $7.83\times$, while MOKP and MOSPP exhibit more moderate gains. Overall, CPU parallelization improves both the performance and robustness of DD enumeration, but with diminishing returns as the thread count increases.
+
+\paragraph{RQ3 (\textsc{PmddC} vs. \textsc{PmddG}).}
+\textsc{PmddG} provides the largest speedups when its intermediate frontiers fit in GPU memory. For MOKP with $N=40$, it attains speedups of $5.51\times$ and $9.71\times$, compared with at most $2.60\times$ and $3.21\times$ for \textsc{PmddC}. On MOSPP with $N=150$, \textsc{PmddG} reaches $2.44\times$ for $K=3$ and $10.98\times$ for $K=7$, with a caveat that it is only able to solve 9 instances in for the $(n,m)=(150,3)$ setting.
+It also outperforms the CPU configurations on the reported MOTSP settings, reaching $8.03\times$, $7.04\times$, $4.40\times$, and $1.94\times$ for $K=4,5,6,7$, respectively. 
+Also note that \textsc{PmddG} is able to solve 5 and 3 more instances than \textsc{Smdd} and \textsc{PmddC$(16)$}, respectively, for the MOTSP with $K=7$. \textsc{PmddG} is also faster than than \textsc{PmddG-TD} in most cases, which indicates that bidirectional enumeration is more effective than top-down enumeration on the GPU, similar to the CPU results reported by \citet{bergman2022network}.
+The GPU is less robust when the DD and its intermediate frontiers exceed device memory. For example, both GPU variants fail on the reported MOSPP instances with $N=200$. Candidate batching bounds the temporary storage used by an individual expansion, but the flattened DD and node frontiers must still reside in GPU memory. Thus, \textsc{PmddG} offers the strongest runtime performance on instances that fit in device memory, whereas \textsc{PmddC} degrades more gracefully as frontier sizes increase. 
+
+\begin{table*}[htbp!]
+\centering
+\scriptsize
+\renewcommand{\arraystretch}{0.97}
+\caption{Enumeration performance across MOKP, MOSPP and MOTSP problems. ``Time(s)'' reports the arithmetic mean of enumeration time over solved instances, and speedups are relative to \textsc{Smdd}. Superscript ``$+$'' denotes the use of state-dominance pruning. Bold values indicate the fastest mean time for each setting. The entry $S^{(M,T)}$ reports solved instances, out-of-memory failures, and timeouts.}
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{lrrlrrrrrlrrrr}
+\toprule
+Problem & $n$ & $m$ & Method & Time (s) & Speedup & $S^{(M,T)}$ &
+$n$ & $m$ & Method & Time (s) & Speedup & $S^{(M,T)}$ \\
+\midrule
+\multirow{16}{*}{MOKP} & \multirow{8}{*}{40} & \multirow{8}{*}{6} & DPA-TS & 1371 & 0.01$\times$ & $2^{(0, 8)}$ & \multirow{8}{*}{40} & \multirow{8}{*}{7} & DPA-TS & -- & -- & $0^{(0, 10)}$ \\
+ &  &  & DPA-A & 1439 & 0.01$\times$ & $2^{(0, 8)}$ &  &  & DPA-A & -- & -- & $0^{(0, 10)}$ \\
+ &  &  & \textsc{Smdd}$^+$ & 10 & 1.00$\times$ & $10$ &  &  & \textsc{Smdd}$^+$ & 33 & 1.00$\times$ & $10$ \\
+ &  &  & \textsc{PmddC}(4)$^+$ & 6 & 1.87$\times$ & $10$ &  &  & \textsc{PmddC}(4)$^+$ & 16 & 2.12$\times$ & $10$ \\
+ &  &  & \textsc{PmddC}(8)$^+$ & 5 & 2.15$\times$ & $10$ &  &  & \textsc{PmddC}(8)$^+$ & 13 & 2.63$\times$ & $10$ \\
+ &  &  & \textsc{PmddC}(16)$^+$ & 4 & 2.60$\times$ & $10$ &  &  & \textsc{PmddC}(16)$^+$ & 11 & 3.21$\times$ & $10$ \\
+ &  &  & \textsc{PmddG$^+$-TD} & 3 & 4.31$\times$ & $10$ &  &  & \textsc{PmddG$^+$-TD} & 5 & 7.12$\times$ & $10$ \\
+ &  &  & \textsc{PmddG}$^+$ & \textbf{2} & 5.51$\times$ & $10$ &  &  & \textsc{PmddG}$^+$ & \textbf{4} & 9.71$\times$ & $10$ \\
+\cmidrule(lr){2-13}
+ & \multirow{8}{*}{70} & \multirow{8}{*}{6} & DPA-TS & -- & -- & $0^{(0, 10)}$ & \multirow{8}{*}{70} & \multirow{8}{*}{7} & DPA-TS & -- & -- & $0^{(0, 10)}$ \\
+ &  &  & DPA-A & -- & -- & $0^{(0, 10)}$ &  &  & DPA-A & -- & -- & $0^{(0, 10)}$ \\
+ &  &  & \textsc{Smdd}$^+$ & 1549 & 1.00$\times$ & $5^{(0, 5)}$ &  &  & \textsc{Smdd}$^+$ & 1650 & 1.00$\times$ & $3^{(0, 7)}$ \\
+ &  &  & \textsc{PmddC}(4)$^+$ & 1326 & 1.17$\times$ & $7^{(0, 3)}$ &  &  & \textsc{PmddC}(4)$^+$ & 1391 & 1.19$\times$ & $4^{(0, 6)}$ \\
+ &  &  & \textsc{PmddC}(8)$^+$ & 1008 & 1.54$\times$ & $7^{(0, 3)}$ &  &  & \textsc{PmddC}(8)$^+$ & 1757 & 0.94$\times$ & $6^{(0, 4)}$ \\
+ &  &  & \textsc{PmddC}(16)$^+$ & 862 & 1.80$\times$ & $7^{(0, 3)}$ &  &  & \textsc{PmddC}(16)$^+$ & 1708 & 0.97$\times$ & $7^{(0, 3)}$ \\
+ &  &  & \textsc{PmddG-TD} & \textbf{335} & 4.63$\times$ & $6^{(4, 0)}$ &  &  & \textsc{PmddG-TD} & \textbf{372} & 4.44$\times$ & $3^{(7, 0)}$ \\
+ &  &  & \textsc{PmddG}$^+$ & 1010 & 1.53$\times$ & $10$ &  &  & \textsc{PmddG}$^+$ & 907 & 1.82$\times$ & $6^{(3, 1)}$ \\
+\midrule
+\multirow{16}{*}{MOSPP} & \multirow{8}{*}{150} & \multirow{8}{*}{3} & DPA-TS & 11 & 1.12$\times$ & $10$ & \multirow{8}{*}{150} & \multirow{8}{*}{7} & DPA-TS & -- & -- & $0^{(0, 10)}$ \\
+ &  &  & DPA-A & 8 & 1.59$\times$ & $10$ &  &  & DPA-A & -- & -- & $0^{(0, 10)}$ \\
+ &  &  & \textsc{Smdd} & 12 & 1.00$\times$ & $10$ &  &  & \textsc{Smdd} & 184 & 1.00$\times$ & $10$ \\
+ &  &  & \textsc{PmddC}(4) & 8 & 1.50$\times$ & $10$ &  &  & \textsc{PmddC}(4) & 84 & 2.20$\times$ & $10$ \\
+ &  &  & \textsc{PmddC}(8) & 8 & 1.50$\times$ & $10$ &  &  & \textsc{PmddC}(8) & 71 & 2.61$\times$ & $10$ \\
+ &  &  & \textsc{PmddC}(16) & 8 & 1.51$\times$ & $10$ &  &  & \textsc{PmddC}(16) & 96 & 1.91$\times$ & $10$  \\
+ &  &  & \textsc{PmddG-TD} & 7 & 1.80$\times$ & $10$ &  &  & \textsc{PmddG-TD} & \textbf{9} & 20.88$\times$ & $10$  \\
+ &  &  & \textsc{PmddG} & \textbf{5} & 2.44$\times$ & $9^{(1, 0)}$ &  &  & \textsc{PmddG} & 17 & 10.98$\times$ & $10$ \\
+\cmidrule(lr){2-13}
+ & \multirow{8}{*}{200} & \multirow{8}{*}{3} & DPA-TS & 32 & 5.15$\times$ & $10$ & \multirow{8}{*}{200} & \multirow{8}{*}{4} & DPA-TS & 913 & 0.20$\times$ & $10$\\
+ &  &  & DPA-A & \textbf{22} & 7.53$\times$ & $10$ &  &  & DPA-A & 793 & 0.23$\times$ & $10$\\
+ &  &  & \textsc{Smdd} & 162 & 1.00$\times$ & $1^{(9, 0)}$  &  &  & \textsc{Smdd} & 186 & 1.00$\times$ & $1^{(9, 0)}$ \\
+ &  &  & \textsc{PmddC}(4) & 93 & 1.75$\times$ & $1^{(9, 0)}$ &  &  & \textsc{PmddC}(4) & 80 & 2.34$\times$ & $1^{(9, 0)}$\\
+ &  &  & \textsc{PmddC}(8) & 87 & 1.86$\times$ & $1^{(9, 0)}$  &  &  & \textsc{PmddC}(8) & 63 & 2.97$\times$ & $1^{(9, 0)}$\\
+ &  &  & \textsc{PmddC}(16) & 72 & 2.27$\times$ & $1^{(8, 1)}$ &  &  & \textsc{PmddC}(16) & \textbf{45} & 4.12$\times$ & $1^{(9, 0)}$\\
+ &  &  & \textsc{PmddG-TD} & -- & -- & $0^{(10, 0)}$  &  &  & \textsc{PmddG-TD} & -- & -- & $0^{(10, 0)}$\\
+ &  &  & \textsc{PmddG} & -- & -- & $0^{(10, 0)}$  & &  & \textsc{PmddG} & -- & -- & $0^{(10, 0)}$\\
+\midrule
+\multirow{16}{*}{MOTSP} & \multirow{8}{*}{15} & \multirow{8}{*}{4} & DPA-TS & -- & -- & $0^{(0, 10)}$ & \multirow{8}{*}{15} & \multirow{8}{*}{5} & DPA-TS & -- & -- & $0^{(0, 10)}$ \\
+ &  &  & DPA-A & -- & -- & $0^{(0, 10)}$ &  &  & DPA-A & -- & -- & $0^{(0, 10)}$ \\
+ &  &  & \textsc{Smdd} & 23 & 1.00$\times$ & $10$ &  &  & \textsc{Smdd} & 335 & 1.00$\times$ & $10$ \\
+ &  &  & \textsc{PmddC}(4) & 7 & 3.47$\times$ & $10$ &  &  & \textsc{PmddC}(4) & 115 & 2.92$\times$ & $10$ \\
+ &  &  & \textsc{PmddC}(8) & 5 & 5.06$\times$ & $10$ &  &  & \textsc{PmddC}(8) & 82 & 4.11$\times$ & $10$ \\
+ &  &  & \textsc{PmddC}(16) & 3 & 7.83$\times$ & $10$ &  &  & \textsc{PmddC}(16) & 67 & 5.05$\times$ & $10$ \\
+ &  &  & \textsc{PmddG-TD} & 3 & 7.50$\times$ & $10$ &  &  & \textsc{PmddG-TD} & \textbf{36} & 9.44$\times$ & $9^{(1, 0)}$ \\
+ &  &  & \textsc{PmddG} & \textbf{3} & 8.03$\times$ & $10$ &  &  & \textsc{PmddG} & 48 & 7.04$\times$ & $10$ \\
+\cmidrule(lr){2-13}
+ & \multirow{8}{*}{15} & \multirow{8}{*}{6} & DPA-TS & -- & -- & $0^{(0, 10)}$ & \multirow{8}{*}{15} & \multirow{8}{*}{7} & DPA-TS & -- & -- & $0^{(0, 10)}$ \\
+ &  &  & DPA-A & -- & -- & $0^{(0, 10)}$ &  &  & DPA-A & -- & -- & $0^{(0, 10)}$ \\
+ &  &  & \textsc{Smdd} & 1623 & 1.00$\times$ & $9^{(0, 1)}$ &  &  & \textsc{Smdd} & 3544 & 1.00$\times$ & $1^{(0, 9)}$ \\
+ &  &  & \textsc{PmddC}(4) & 870 & 1.87$\times$ & $10$ &  &  & \textsc{PmddC}(4) & 2508 & 1.41$\times$ & $3^{(0, 7)}$ \\
+ &  &  & \textsc{PmddC}(8) & 711 & 2.28$\times$ & $10$ &  &  & \textsc{PmddC}(8) & 2123 & 1.67$\times$ & $3^{(0, 7)}$ \\
+ &  &  & \textsc{PmddC}(16) & 641 & 2.53$\times$ & $10$ &  &  & \textsc{PmddC}(16) & 1930 & 1.84$\times$ & $3^{(0, 7)}$ \\
+ &  &  & \textsc{PmddG-TD} & -- & -- & $0^{(10, 0)}$ &  &  & \textsc{PmddG-TD} & -- & -- & $0^{(10, 0)}$ \\
+ &  &  & \textsc{PmddG} & \textbf{369} & 4.40$\times$ & $10$ &  &  & \textsc{PmddG} & \textbf{1828} & 1.94$\times$ & $6^{(3, 1)}$ \\
+\bottomrule
+\end{tabular}
+}
+\label{tab:combined_result_short}
+\end{table*}
+
+
+\section{Related Work}
+\label{sec:related}
+We position \textsc{Pmdd} at the intersection of exact MODO and parallel discrete optimization. We first review how exact methods organize PF enumeration, and then distinguish our approach from methods that parallelize search, DD construction, or operations on the DD structure itself.
+
+\subsection{Exact Multiobjective Discrete Optimization}
+\label{sec:related_exact}
+Exact MODO algorithms can be classified by whether they organize enumeration in criterion space, decision space, or a DP state space \citep{ehrgott2016exact,halffmann2022exact}. Criterion-space methods partition the unexplored objective region and solve a sequence of scalarized or constrained single-objective subproblems. Representative approaches include recursive and box-decomposition methods \citep{ozlen2009multi,ozlen2014multi,boland2015criterion}, parameter-space search \citep{kirlik2014new}, and more recent objective-space algorithms for multiobjective integer programming \citep{tamby2021enumeration,dachert2024simple}.
+
+Decision-space methods instead retain a branch-and-bound or branch-and-cut tree over the original decision variables. Early algorithms adapted integer-programming enumeration to identify efficient solutions \citep{klein1982algorithm,kiziltan1983algorithm}. More recent biobjective methods replace scalar node bounds with vector-valued bound sets that are compared against the incumbent PF. This line of work has developed stronger bound sets and fathoming tests, problem-independent branching rules, presolve techniques, and hybrid strategies that also branch in objective space \citep{stidsen2014branch,parragh2019branch,adelgren2022branch}. These methods avoid explicitly partitioning the entire objective space, but their performance depends on the strength and computational cost of the bound sets computed throughout the search tree.
+
+State-space methods represent the underlying DP recursion as a network rather than searching a branch-and-bound tree. The exact DD framework adopted in this paper follows \citet{bergman2016multiobjective,bergman2022network} and is summarized in \Cref{sec:prelim_dd}. We retain this representation and its enumeration semantics, but parallelize the label operations used to recover the PF.
+
+DDs have also been used for a different purpose in constraint programming. The Pareto constraint maintains an archive of nondominated solutions discovered during tree search and uses this archive to filter the domains of the objective variables \citep{hartert2014pareto}. \citet{malalel2023mdd} encode the archive as an MDD to accelerate its update and filtering operations. In our setting, by contrast, the DD represents the fixed DP state space, and each node frontier contains the nondominated objective vectors of partial paths through that state. Thus, the constraint-programming MDD is an incrementally updated solution archive, whereas our method propagates labels over a fixed state-space DD to recover the PF.
+
+
+\subsection{Parallel Computing for Discrete Optimization}
+
+Parallel exact optimization has traditionally focused on branch-and-bound, where nodes or subtrees are distributed across workers \citep{kindervater1986introduction,gendron1994parallel,ralphs2003parallel,linderoth2003decomposition}. Effective parallelization requires balancing this irregular workload while limiting communication and synchronization. Moreover, parallel execution can change when incumbents and bounds are discovered and may therefore increase the total amount of search \citep{lai1984anomalies}. Parallelism has also been studied in DD-based optimization. \citet{bergman2014parallel} distribute subproblems generated by an exact branch-and-bound framework based on approximate DDs, while \citet{perez2018parallel} parallelize reduction and set operations that modify the structure of an MDD. In contrast, \textsc{PmddC} operates on an already constructed exact DD and parallelizes node-frontier expansion and the reduction of cutset frontiers.
+
+GPUs have been used to accelerate simplex and interior-point computations \citep{lalami2011gpu,ploskas2016gpu,shin2025madipm}, while GPU-native first-order methods have shown strong performance on large linear programs \citep{applegate2021practical,lu2025cupdlp,lu2023cupdlpc,lu2025cupdlpx}. Extending GPU acceleration to mixed-integer optimization is more difficult because branch-and-bound produces irregular, dynamically changing workloads. Existing work has therefore focused on accelerating selected optimization kernels and problem-specific algorithms on the GPU \citep{boyer2017gpu}. More recently, \citet{ccorduk2025gpu} developed GPU-accelerated primal heuristics for MIP, including Feasibility Pump, Feasibility Jump, and Fix-and-Propagate.
+
+Closest to our setting, \citet{tardivo2026complete,tardivo2026gpu} accelerate DD construction on GPUs. The former parallelizes state expansion over fragments in complete anytime DD search; the latter uses the GPU to compile relaxed DDs within branch-and-bound while CPU threads construct restricted DDs. Both operate on DP states and parallelize construction primitives such as successor generation and dominance filtering. In contrast, \textsc{PmddG} starts from an already constructed exact DD and parallelizes objective-label propagation and dominance filtering during PF enumeration. Their methods therefore accelerate DD construction and search, whereas ours accelerates post-construction multiobjective enumeration.
+
+\section{Conclusion and Future Work}
+\label{sec:conclusion}
+This paper introduced \textsc{Pmdd}, a parallel framework for exact bidirectional PF enumeration on DDs. Its CPU implementation, \textsc{PmddC}, distributes node-frontier expansion across threads and combines cutset frontiers through a parallel reduction. Its GPU implementation, \textsc{PmddG}, exposes finer-grained parallelism in candidate generation, dominance filtering, and frontier reduction. Experiments on MOKP, MOSPP, and MOTSP show that DD-based enumeration is more robust than the MIP baseline on MOKP and MOTSP, while the MIP approach remains competitive on large MOSPP instances with few objectives. Among the parallel variants, the GPU provides the strongest performance when the DD and intermediate frontiers fit in device memory, whereas the CPU remains more reliable under memory pressure.
+
+The results identify two immediate directions for improving scalability. On the CPU, dividing large node-frontier updates among multiple threads could reduce load imbalance beyond the current node-level decomposition. On the GPU, sharing the flattened arc representation between traversal directions, reusing temporary buffers, and routing operations that exceed device memory to the CPU could improve robustness while retaining GPU performance on smaller frontiers.
+
+A longer-term limitation is the assumption that the complete exact DD and its node frontiers fit in memory. Embedding PF enumeration within a DD-based branch-and-bound framework over restricted and relaxed DDs \citep{bergman2016decision} would avoid constructing and retaining the full exact diagram. The parallel label-propagation and dominance-filtering operations developed here could then be reused to accelerate the recovery of primal and dual bound sets from restricted and relaxed DDs, respectively.
+
+\bibliography{references}
+
+\newpage
+
+\appendix
+
+\section{Graphics Processing Unit}
+\label{sec:prelim_gpu}
+
+GPUs are throughput-oriented processors that achieve high performance by executing many lightweight threads in parallel. In contrast, CPUs comprise a small number of complex cores optimized for low-latency execution and sophisticated control flow. This architectural difference makes GPUs particularly effective for data-parallel workloads in which the same operation is applied independently across many inputs \cite{lindholm2008nvidia}.
+\Cref{fig:gpu_arch} illustrates the GPU execution and memory hierarchy. Computation is launched as a \emph{kernel}, which executes as a large collection of \emph{threads}. Threads are grouped into \emph{thread blocks}, and all blocks in a kernel launch form a \emph{grid} \cite{nickolls2008scalable}. The GPU schedules thread blocks onto \emph{Streaming Multiprocessors} (SMs), where each SM can host multiple blocks concurrently and executes threads in a \emph{Single Instruction Multiple Thread} (SIMT) manner, where threads follow the same instruction stream while operating on different data.
+
+\input{figures/gpu.tex}
+
+The memory system is also hierarchical. Threads within an SM have access to fast on-chip storage, including registers and shared memory, which enables efficient intra-block cooperation and synchronization. SMs connect to a larger, device-wide cache (L2) and ultimately to high-capacity but high-latency global memory (DRAM). Effective GPU implementations therefore aim to expose ample parallelism while limiting expensive global-memory traffic \cite{nickolls2010gpu}.
+This execution model is well suited for workloads dominated by large numbers of independent arithmetic operations and comparisons. In particular, pairwise dominance checks required during PF enumeration in Algorithm~\ref{alg:bidir_pf} are natural candidates for GPU acceleration.
+
+\section{Implementation Details}
+\label{app:implementation_details}
+
+
+This appendix details the parallel operations referenced in the main text. The CPU routine merges the private cutset frontiers constructed by \textsc{Couple}$_{\mathrm{CPU}}$. The GPU routines implement the four stages of \textsc{ExpandLayer}$_{\mathrm{GPU}}$ and the product materialization used by \textsc{Couple}$_{\mathrm{GPU}}$ in \Cref{alg:gpu_bidir_pf}. These routines concern objective-label propagation and filtering. 
+% The optional state-dominance pruning used by the ``$+$'' variants is problem-specific and is not part of this generic pipeline.
+
+\subsection{CPU Parallelization}
+\label{app:cpu_implementation}
+
+During cutset coupling, each worker accumulates the products of its assigned cutset nodes in a private nondominated frontier. Since no frontier is shared at this stage, the private frontiers can be combined in pairs without synchronization between pairs. \Cref{alg:cpu_tree_reduction} repeats these pairwise merges until one frontier remains. An unpaired frontier advances unchanged to the next level.
+
+\begin{algorithm}[htbp]
+\caption{CPU Tree Reduction for Cutset Frontiers}
+\label{alg:cpu_tree_reduction}
+\begin{algorithmic}[1]
+\Require Private cutset frontiers $\mathcal{P}=[\mathcal{P}_1,\dots,\mathcal{P}_q]$
+\Procedure{TreeReduce}{$\mathcal{P}$}
+    \If{$|\mathcal{P}|=0$}
+        \State \Return $\emptyset$
+    \EndIf
+    \While{$|\mathcal{P}|>1$}
+        \State $h\gets\lfloor |\mathcal{P}|/2\rfloor$ and $\mathcal{Q}\gets[\,]$
+        \ForAll{$r=1,\dots,h$ \textbf{in parallel}}
+            \State $\mathcal{Q}_r\gets
+            \Call{FilterDominated}{\mathcal{P}_{2r-1}\cup\mathcal{P}_{2r}}$
+        \EndFor
+        \If{$|\mathcal{P}|$ is odd}
+            \State $\mathcal{Q}_{h+1}\gets\mathcal{P}_{|\mathcal{P}|}$
+        \EndIf
+        \State $\mathcal{P}\gets\mathcal{Q}$
+    \EndWhile
+    \State \Return $\mathcal{P}_1$
+\EndProcedure
+\end{algorithmic}
+\end{algorithm}
+
+\subsection{GPU Parallelization}
+\label{app:gpu_implementation}
+
+GPU layer expansion follows four logical stages, each of which may use multiple CUDA kernels or parallel scan operations. \Cref{alg:compute_arc_offsets} assigns a contiguous candidate segment to every arc and node. \Cref{alg:expand_candidates} materializes shifted labels in these segments. \Cref{alg:dynamic_1D_kernel} filters each node segment using a number of thread blocks proportional to its cardinality, and \Cref{alg:compact_survivors} converts the survivor flags into the flat frontier representation used by the next layer. \Cref{alg:materialize_cutset_products} separately materializes the node products required during cutset coupling.
+
+Let $\mathcal{Y}$ denote a flat label array, with $\phi^y_v$ giving the first label of node $v$. For an arc $a$, $b_a$ is the adjacent-node index, $\mathbf{v}_a$ is its objective weight, $\kappa_a$ is its candidate count, and $\phi^c_a$ is the beginning of its candidate segment. The arc offsets $\phi^a_v$ delimit the arcs assigned to node $v$, while $\Gamma_v$ is the total number of candidates in that node segment.
+
+\begin{algorithm}[t!]
+\caption{Compute GPU Candidate Offsets}
+\label{alg:compute_arc_offsets}
+\begin{algorithmic}[1]
+\Require Frontier offsets $\phi^y$; adjacent-node indices $b$; node-arc offsets $\phi^a$
+\Procedure{ComputeArcOffsets}{$\phi^y,b,\phi^a$}
+    \State $M\gets |b|$
+    \ForAll{arcs $a=0,\dots,M-1$ \textbf{in parallel on GPU}}
+        \State $\kappa_a\gets\phi^y_{b_a+1}-\phi^y_{b_a}$
+    \EndFor
+    \State $(\phi^c_0,\dots,\phi^c_M)
+    \gets\Call{ExclusiveOffsets}{\kappa_0,\dots,\kappa_{M-1}}$
+    \ForAll{nodes $v$ in the destination batch \textbf{in parallel on GPU}}
+        \State $\Gamma_v\gets
+        \phi^c_{\phi^a_{v+1}}-\phi^c_{\phi^a_v}$
+    \EndFor
+    \State \Return $\kappa,\phi^c,\Gamma$
+\EndProcedure
+\end{algorithmic}
+\end{algorithm}
+
+The scan in \Cref{alg:compute_arc_offsets} gives every arc a disjoint output interval. Since the arcs of a node are contiguous, their intervals also form one contiguous node segment. Candidate materialization can therefore proceed without atomic writes. The implementation distributes the arcs across the warps in the grid and lets the lanes of each warp generate the labels of one arc cooperatively, as shown in \Cref{alg:expand_candidates}.
+
+\begin{algorithm}[htbp!]
+\caption{Materialize GPU Layer Candidates}
+\label{alg:expand_candidates}
+\begin{algorithmic}[1]
+\Require Label array $\mathcal{Y}$; frontier offsets $\phi^y$; adjacent-node indices $b$; arc weights $\mathbf{v}$; candidate offsets $\phi^c$; counts $\kappa$
+\Procedure{ExpandCandidates}{$\mathcal{Y},\phi^y,b,\mathbf{v},\phi^c,\kappa$}
+    \State Allocate $\beta$ with $\phi^c_M$ labels
+    \State $W\gets$ number of warps in the grid
+    \ForAll{warps $w=0,\dots,W-1$ \textbf{in parallel on GPU}}
+        \For{$a=w,w+W,w+2W,\dots<M$}
+            \ForAll{$k=\ell,\ell+32,\dots<\kappa_a$ across warp lanes $\ell$}
+                \State $\beta[\phi^c_a+k]\gets
+                \mathcal{Y}[\phi^y_{b_a}+k]+\mathbf{v}_a$
+            \EndFor
+        \EndFor
+    \EndFor
+    \State \Return $\beta$
+\EndProcedure
+\end{algorithmic}
+\end{algorithm}
+
+\Cref{alg:dynamic_1D_kernel} assigns $K_v=\lceil\Gamma_v/B\rceil$ blocks to node $v$, where $B$ is the number of threads per block. Each block owns at most $B$ candidate labels and compares them against the complete node segment in shared-memory tiles. Equal labels are resolved by retaining the earliest candidate. Once a thread finds that its label is dominated, it stops comparing but continues through the block barriers required by the remaining threads.
+
+\begin{algorithm}[t]
+\caption{Load-Balanced GPU Dominance Filtering}
+\label{alg:dynamic_1D_kernel}
+\begin{algorithmic}[1]
+\Require Candidate buffer $\beta$; node-arc offsets $\phi^a$; candidate offsets $\phi^c$; node counts $\Gamma$; block size $B$
+\Procedure{FilterDominated}{$\beta,\phi^a,\phi^c,\Gamma,B$}
+    \State $K_v\gets\lceil\Gamma_v/B\rceil$ for all nodes $v$
+    \State $\phi^k\gets\Call{ExclusiveOffsets}{K}$
+    \State $\sigma_i\gets 0$ for all candidates $i$; $\eta_v\gets0$ for all nodes $v$
+    \ForAll{blocks $q=0,\dots,\sum_vK_v-1$ \textbf{in parallel on GPU}}
+        \State Find $v$ such that $\phi^k_v\le q<\phi^k_{v+1}$ by binary search
+        \State $\tau\gets q-\phi^k_v$ and $c_v\gets\phi^c_{\phi^a_v}$
+        \State $i_{\mathrm{loc}}\gets\tau B+\text{threadIdx}$
+        \If{$i_{\mathrm{loc}}<\Gamma_v$}
+            \State Load $\mathbf{y}_i\gets\beta[c_v+i_{\mathrm{loc}}]$ into a register
+        \EndIf
+        \State $d_i\gets\mathbf{false}$
+        \For{$s=0,B,2B,\dots<\Gamma_v$}
+            \State Cooperatively load $\beta[c_v+s:c_v+s+B]$ into shared memory
+            \State \textbf{Barrier}: wait until the shared tile is visible
+            \If{$i_{\mathrm{loc}}<\Gamma_v$ and not $d_i$}
+                \For{$j=0,\dots,\min(B,\Gamma_v-s)-1$}
+                    \State $j_{\mathrm{loc}}\gets s+j$
+                    \If{$j_{\mathrm{loc}}\neq i_{\mathrm{loc}}$ and
+                    $\bigl(\text{shared}[j]\prec\mathbf{y}_i$ or
+                    $(\text{shared}[j]=\mathbf{y}_i$ and $j_{\mathrm{loc}}<i_{\mathrm{loc}})\bigr)$}
+                        \State $d_i\gets\mathbf{true}$; \textbf{break}
+                    \EndIf
+                \EndFor
+            \EndIf
+            \State \textbf{Barrier}: wait before overwriting the shared tile
+        \EndFor
+        \If{$i_{\mathrm{loc}}<\Gamma_v$}
+            \State $\sigma_{c_v+i_{\mathrm{loc}}}\gets\mathbb{I}[\neg d_i]$
+        \EndIf
+        \State Atomically add the block sum of $\sigma$ to $\eta_v$
+    \EndFor
+    \State \Return $\sigma,\eta$
+\EndProcedure
+\end{algorithmic}
+\end{algorithm}
+
+The survivor flags preserve the node-segment order of the candidate buffer. Consequently, a global scan compacts the labels while an exclusive scan over the per-node survivor counts reconstructs the offsets of the next frontier.
+
+\begin{algorithm}[htbp!]
+\caption{Compact GPU Node Frontiers}
+\label{alg:compact_survivors}
+\begin{algorithmic}[1]
+\Require Candidate buffer $\beta$ of size $S$; survivor flags $\sigma$; optional per-node survivor counts $\eta$
+\Procedure{CompactSurvivors}{$\beta,\sigma[,\eta]$}
+    \State $\rho\gets\Call{ExclusiveOffsets}{\sigma}$
+    \Comment{$|\rho|=S+1$}
+    \If{$\eta$ is provided}
+        \State $\phi^y\gets\Call{ExclusiveOffsets}{\eta}$
+    \EndIf
+    \State Allocate $\mathcal{Y}^{\mathrm{next}}$ with $\rho_S$ labels
+    \ForAll{$i=0,\dots,S-1$ \textbf{in parallel on GPU}}
+        \If{$\sigma_i=1$}
+            \State $\mathcal{Y}^{\mathrm{next}}[\rho_i]\gets\beta[i]$
+        \EndIf
+    \EndFor
+    \If{$\eta$ is provided}
+        \State \Return $\phi^y,\mathcal{Y}^{\mathrm{next}}$
+    \EndIf
+    \State \Return $\mathcal{Y}^{\mathrm{next}}$
+\EndProcedure
+\end{algorithmic}
+\end{algorithm}
+
+During coupling, the top-down and bottom-up frontiers of a cutset node occupy the intervals given by $\phi^{\downarrow}$ and $\phi^{\uparrow}$. Let $\mathcal{F}^d=(\mathcal{Y}^d,\phi^d,\kappa^d)$ denote the flat frontier representation in direction $d$. \Cref{alg:materialize_cutset_products} assigns one block to each active node in the batch and distributes that node's Cartesian product across its threads. The product offsets $\phi^p$ assign disjoint output intervals to nodes.
+
+\begin{algorithm}[htbp!]
+\caption{Materialize GPU Cutset Products}
+\label{alg:materialize_cutset_products}
+\begin{algorithmic}[1]
+\Require Flat frontiers $\mathcal{F}^{\downarrow},\mathcal{F}^{\uparrow}$; batch $\mathcal{B}$; product offsets $\phi^p$; block size $B$
+\Procedure{MaterializeProducts}{$\mathcal{F}^{\downarrow},\mathcal{F}^{\uparrow},\mathcal{B},\phi^p$}
+    \State Allocate $\beta$ with $\phi^p_{|\mathcal{B}|}$ labels
+    \ForAll{nodes $v\in\mathcal{B}$ \textbf{in parallel on GPU}}
+        \Comment{One block per node}
+        \State $T_v\gets\kappa_v^{\downarrow}\kappa_v^{\uparrow}$
+        \ForAll{$p=\text{threadIdx},\text{threadIdx}+B,\dots<T_v$}
+            \State $i\gets\lfloor p/\kappa_v^{\uparrow}\rfloor$ and
+            $j\gets p\bmod\kappa_v^{\uparrow}$
+            \State $\mathbf{y}^{\downarrow}\gets
+            \mathcal{Y}^{\downarrow}[\phi_v^{\downarrow}+i]$ and
+            $\mathbf{y}^{\uparrow}\gets
+            \mathcal{Y}^{\uparrow}[\phi_v^{\uparrow}+j]$
+            \State $\beta[\phi^p_v+p]\gets
+            \mathbf{y}^{\downarrow}+\mathbf{y}^{\uparrow}$
+        \EndFor
+    \EndFor
+    \State \Return $\beta$
+\EndProcedure
+\end{algorithmic}
+\end{algorithm}
+\FloatBarrier
+
+
+\section{Additional Experimental Results}
+\label{app:additional_results}
+The full MOKP and MOSPP results are given in \Cref{tab:mokp_result,tab:mospp_result}, respectively. The results highlight that the trend is similar to the short version in \Cref{tab:combined_result_short}, with \textsc{PmddG} providing the best performance when the DD and intermediate frontiers fit in device memory, while \textsc{PmddC} is more robust under memory pressure. The MIP baseline is competitive on small instances but fails to scale to larger problems.
+
+\begin{table*}[t]
+\centering
+\scriptsize
+\caption{Detailed results for MOKP across all problem sizes.}
+\resizebox{0.8\textwidth}{!}{%
+\begin{tabular}{rrlrrrrrlrrr}
+\toprule
+$n$ & $m$ & Method & Time (S) & Speedup & $S^{(M,T)}$ & $n$ & $m$ & Method & Time (S) & Speedup & $S^{(M,T)}$ \\
+\midrule
+\multirow{8}{*}{40} & \multirow{8}{*}{6} & DPA-TS & 1371 & 0.01$\times$ & $2^{(0, 8)}$ & \multirow{8}{*}{40} & \multirow{8}{*}{7} & DPA-TS & -- & -- & $0^{(0, 10)}$ \\
+ &  & DPA-A & 1439 & 0.01$\times$ & $2^{(0, 8)}$ &  &  & DPA-A & -- & -- & $0^{(0, 10)}$ \\
+ &  & \textsc{Smdd}$^+$ & 10 & 1.00$\times$ & $10$ &  &  & \textsc{Smdd}$^+$ & 33 & 1.00$\times$ & $10$ \\
+ &  & \textsc{PmddC}(4)$^+$ & 6 & 1.87$\times$ & $10$ &  &  & \textsc{PmddC}(4)$^+$ & 16 & 2.12$\times$ & $10$ \\
+ &  & \textsc{PmddC}(8)$^+$ & 5 & 2.15$\times$ & $10$ &  &  & \textsc{PmddC}(8)$^+$ & 13 & 2.63$\times$ & $10$ \\
+ &  & \textsc{PmddC}(16)$^+$ & 4 & 2.60$\times$ & $10$ &  &  & \textsc{PmddC}(16)$^+$ & 11 & 3.21$\times$ & $10$ \\
+ &  & \textsc{PmddG$^+$-TD} & 3 & 4.31$\times$ & $10$ &  &  & \textsc{PmddG$^+$-TD} & 5 & 7.12$\times$ & $10$ \\
+ &  & \textsc{PmddG}$^+$ & \textbf{2} & 5.51$\times$ & $10$ &  &  & \textsc{PmddG}$^+$ & \textbf{4} & 9.71$\times$ & $10$ \\
+\midrule
+\multirow{8}{*}{50} & \multirow{8}{*}{5} & DPA-TS & 1752 & 0.01$\times$ & $5^{(0, 5)}$ & \multirow{8}{*}{50} & \multirow{8}{*}{6} & DPA-TS & -- & -- & $0^{(0, 10)}$ \\
+ &  & DPA-A & 1625 & 0.01$\times$ & $5^{(0, 5)}$ &  &  & DPA-A & -- & -- & $0^{(0, 10)}$ \\
+ &  & \textsc{Smdd}$^+$ & 19 & 1.00$\times$ & $10$ &  &  & \textsc{Smdd}$^+$ & 184 & 1.00$\times$ & $10$ \\
+ &  & \textsc{PmddC}(4)$^+$ & 9 & 2.06$\times$ & $10$ &  &  & \textsc{PmddC}(4)$^+$ & 82 & 2.26$\times$ & $10$ \\
+ &  & \textsc{PmddC}(8)$^+$ & 8 & 2.42$\times$ & $10$ &  &  & \textsc{PmddC}(8)$^+$ & 63 & 2.94$\times$ & $10$ \\
+ &  & \textsc{PmddC}(16)$^+$ & 7 & 2.93$\times$ & $10$ &  &  & \textsc{PmddC}(16)$^+$ & 52 & 3.59$\times$ & $10$ \\
+ &  & \textsc{PmddG$^+$-TD} & \textbf{3} & 6.49$\times$ & $10$ &  &  & \textsc{PmddG$^+$-TD} & 45 & 4.09$\times$ & $10$ \\
+ &  & \textsc{PmddG}$^+$ & 4 & 5.89$\times$ & $10$ &  &  & \textsc{PmddG}$^+$ & \textbf{26} & 7.12$\times$ & $10$ \\
+\midrule
+\multirow{8}{*}{50} & \multirow{8}{*}{7} & DPA-TS & -- & -- & $0^{(0, 10)}$ & \multirow{8}{*}{60} & \multirow{8}{*}{4} & DPA-TS & 1102 & 0.01$\times$ & $9^{(0, 1)}$ \\
+ &  & DPA-A & -- & -- & $0^{(0, 10)}$ &  &  & DPA-A & 925 & 0.02$\times$ & $9^{(0, 1)}$ \\
+ &  & \textsc{Smdd}$^+$ & 499 & 1.00$\times$ & $10$ &  &  & \textsc{Smdd}$^+$ & 16 & 1.00$\times$ & $10$ \\
+ &  & \textsc{PmddC}(4)$^+$ & 229 & 2.18$\times$ & $10$ &  &  & \textsc{PmddC}(4)$^+$ & 8 & 2.04$\times$ & $10$ \\
+ &  & \textsc{PmddC}(8)$^+$ & 180 & 2.78$\times$ & $10$ &  &  & \textsc{PmddC}(8)$^+$ & 7 & 2.36$\times$ & $10$ \\
+ &  & \textsc{PmddC}(16)$^+$ & 150 & 3.34$\times$ & $10$ &  &  & \textsc{PmddC}(16)$^+$ & 6 & 3.01$\times$ & $10$ \\
+ &  & \textsc{PmddG$^+$-TD} & \textbf{81} & 6.20$\times$ & $10$ &  &  & \textsc{PmddG$^+$-TD} & \textbf{3} & 7.74$\times$ & $10$ \\
+ &  & \textsc{PmddG}$^+$ & 82 & 6.08$\times$ & $10$ &  &  & \textsc{PmddG}$^+$ & 3 & 6.98$\times$ & $10$ \\
+\midrule
+\multirow{8}{*}{60} & \multirow{8}{*}{5} & DPA-TS & -- & -- & $0^{(0, 10)}$ & \multirow{8}{*}{60} & \multirow{8}{*}{6} & DPA-TS & -- & -- & $0^{(0, 10)}$ \\
+ &  & DPA-A & -- & -- & $0^{(0, 10)}$ &  &  & DPA-A & -- & -- & $0^{(0, 10)}$ \\
+ &  & \textsc{Smdd}$^+$ & 190 & 1.00$\times$ & $10$ &  &  & \textsc{Smdd}$^+$ & 849 & 1.00$\times$ & $8^{(0, 2)}$ \\
+ &  & \textsc{PmddC}(4)$^+$ & 84 & 2.27$\times$ & $10$ &  &  & \textsc{PmddC}(4)$^+$ & 678 & 1.25$\times$ & $10$ \\
+ &  & \textsc{PmddC}(8)$^+$ & 67 & 2.83$\times$ & $10$ &  &  & \textsc{PmddC}(8)$^+$ & 424 & 2.00$\times$ & $10$ \\
+ &  & \textsc{PmddC}(16)$^+$ & 57 & 3.34$\times$ & $10$ &  &  & \textsc{PmddC}(16)$^+$ & 341 & 2.49$\times$ & $10$ \\
+ &  & \textsc{PmddG$^+$-TD} & \textbf{30} & 6.31$\times$ & $10$ &  &  & \textsc{PmddG$^+$-TD} & 201 & 4.23$\times$ & $10$ \\
+ &  & \textsc{PmddG}$^+$ & 30 & 6.31$\times$ & $10$ &  &  & \textsc{PmddG}$^+$ & \textbf{156} & 5.45$\times$ & $10$ \\
+\midrule
+\multirow{8}{*}{60} & \multirow{8}{*}{7} & DPA-TS & -- & -- & $0^{(0, 10)}$ & \multirow{8}{*}{70} & \multirow{8}{*}{3} & DPA-TS & 87 & 0.05$\times$ & $10$ \\
+ &  & DPA-A & -- & -- & $0^{(0, 10)}$ &  &  & DPA-A & 62 & 0.07$\times$ & $10$ \\
+ &  & \textsc{Smdd}$^+$ & 1244 & 1.00$\times$ & $6^{(0, 4)}$ &  &  & \textsc{Smdd}$^+$ & 5 & 1.00$\times$ & $10$ \\
+ &  & \textsc{PmddC}(4)$^+$ & 969 & 1.28$\times$ & $7^{(0, 3)}$ &  &  & \textsc{PmddC}(4)$^+$ & 3 & 1.61$\times$ & $10$ \\
+ &  & \textsc{PmddC}(8)$^+$ & 730 & 1.71$\times$ & $7^{(0, 3)}$ &  &  & \textsc{PmddC}(8)$^+$ & 3 & 1.61$\times$ & $10$ \\
+ &  & \textsc{PmddC}(16)$^+$ & 607 & 2.05$\times$ & $7^{(0, 3)}$ &  &  & \textsc{PmddC}(16)$^+$ & 3 & 1.80$\times$ & $10$ \\
+ &  & \textsc{PmddG$^+$-TD} & \textbf{325} & 3.83$\times$ & $6^{(4, 0)}$ &  &  & \textsc{PmddG$^+$-TD} & \textbf{2} & 3.38$\times$ & $10$ \\
+ &  & \textsc{PmddG}$^+$ & 787 & 1.58$\times$ & $10$ &  &  & \textsc{PmddG}$^+$ & 2 & 2.78$\times$ & $10$ \\
+\midrule
+\multirow{8}{*}{70} & \multirow{8}{*}{4} & DPA-TS & 2144 & 0.03$\times$ & $6^{(0, 4)}$ & \multirow{8}{*}{70} & \multirow{8}{*}{5} & DPA-TS & -- & -- & $0^{(0, 10)}$ \\
+ &  & DPA-A & 2130 & 0.03$\times$ & $7^{(0, 3)}$ &  &  & DPA-A & -- & -- & $0^{(0, 10)}$ \\
+ &  & \textsc{Smdd}$^+$ & 70 & 1.00$\times$ & $10$ &  &  & \textsc{Smdd}$^+$ & 768 & 1.00$\times$ & $8^{(0, 2)}$ \\
+ &  & \textsc{PmddC}(4)$^+$ & 33 & 2.12$\times$ & $10$ &  &  & \textsc{PmddC}(4)$^+$ & 728 & 1.05$\times$ & $9^{(0, 1)}$ \\
+ &  & \textsc{PmddC}(8)$^+$ & 27 & 2.64$\times$ & $10$ &  &  & \textsc{PmddC}(8)$^+$ & 539 & 1.42$\times$ & $9^{(0, 1)}$ \\
+ &  & \textsc{PmddC}(16)$^+$ & 23 & 3.08$\times$ & $10$ &  &  & \textsc{PmddC}(16)$^+$ & 649 & 1.18$\times$ & $10$ \\
+ &  & \textsc{PmddG$^+$-TD} & \textbf{9} & 8.41$\times$ & $10$ &  &  & \textsc{PmddG$^+$-TD} & \textbf{182} & 4.22$\times$ & $9^{(1, 0)}$ \\
+ &  & \textsc{PmddG}$^+$ & 9 & 8.28$\times$ & $10$ &  &  & \textsc{PmddG}$^+$ & 291 & 2.64$\times$ & $10$ \\
+\midrule
+\multirow{8}{*}{70} & \multirow{8}{*}{6} & DPA-TS & -- & -- & $0^{(0, 10)}$ & \multirow{8}{*}{70} & \multirow{8}{*}{7} & DPA-TS & -- & -- & $0^{(0, 10)}$ \\
+ &  & DPA-A & -- & -- & $0^{(0, 10)}$ &  &  & DPA-A & -- & -- & $0^{(0, 10)}$ \\
+ &  & \textsc{Smdd}$^+$ & 1549 & 1.00$\times$ & $5^{(0, 5)}$ &  &  & \textsc{Smdd}$^+$ & 1650 & 1.00$\times$ & $3^{(0, 7)}$ \\
+ &  & \textsc{PmddC}(4)$^+$ & 1326 & 1.17$\times$ & $7^{(0, 3)}$ &  &  & \textsc{PmddC}(4)$^+$ & 1391 & 1.19$\times$ & $4^{(0, 6)}$ \\
+ &  & \textsc{PmddC}(8)$^+$ & 1008 & 1.54$\times$ & $7^{(0, 3)}$ &  &  & \textsc{PmddC}(8)$^+$ & 1757 & 0.94$\times$ & $6^{(0, 4)}$ \\
+ &  & \textsc{PmddC}(16)$^+$ & 862 & 1.80$\times$ & $7^{(0, 3)}$ &  &  & \textsc{PmddC}(16)$^+$ & 1708 & 0.97$\times$ & $7^{(0, 3)}$ \\
+ &  & \textsc{PmddG$^+$-TD} & \textbf{335} & 4.63$\times$ & $6^{(4, 0)}$ &  &  & \textsc{PmddG$^+$-TD} & \textbf{372} & 4.44$\times$ & $3^{(7, 0)}$ \\
+ &  & \textsc{PmddG}$^+$ & 1010 & 1.53$\times$ & $10$ &  &  & \textsc{PmddG}$^+$ & 907 & 1.82$\times$ & $6^{(3, 1)}$ \\
+\bottomrule
+\end{tabular}
+}
+\label{tab:mokp_result}
+\end{table*}
+
+\begin{table*}[t]
+\centering
+\scriptsize
+\caption{Detailed results for MOSPP across all problem sizes.}
+\resizebox{0.8\textwidth}{!}{%
+\begin{tabular}{rrlrrrrrlrrr}
+\toprule
+$n$ & $m$ & Method & Time (S) & Speedup & $S^{(M,T)}$ & $n$ & $m$ & Method & Time (S) & Speedup & $S^{(M,T)}$ \\
+\midrule
+\multirow{8}{*}{150} & \multirow{8}{*}{3} & DPA-TS & 11 & 1.12$\times$ & $10$ & \multirow{8}{*}{150} & \multirow{8}{*}{4} & DPA-TS & 486 & 0.03$\times$ & $10$ \\
+ &  & DPA-A & 8 & 1.59$\times$ & $10$ &  &  & DPA-A & 420 & 0.04$\times$ & $10$ \\
+ &  & \textsc{Smdd} & 12 & 1.00$\times$ & $10$ &  &  & \textsc{Smdd} & 16 & 1.00$\times$ & $10$ \\
+ &  & \textsc{PmddC}(4) & 8 & 1.50$\times$ & $10$ &  &  & \textsc{PmddC}(4) & 10 & 1.54$\times$ & $10$ \\
+ &  & \textsc{PmddC}(8) & 8 & 1.50$\times$ & $10$ &  &  & \textsc{PmddC}(8) & 9 & 1.84$\times$ & $10$ \\
+ &  & \textsc{PmddC}(16) & 8 & 1.51$\times$ & $10$ &  &  & \textsc{PmddC}(16) & 7 & 2.16$\times$ & $10$ \\
+ &  & \textsc{PmddG-TD} & 7 & 1.80$\times$ & $10$ &  &  & \textsc{PmddG-TD} & 6 & 2.74$\times$ & $10$ \\
+ &  & \textsc{PmddG} & \textbf{5} & 2.44$\times$ & $9^{(1, 0)}$ &  &  & \textsc{PmddG} & \textbf{6} & 2.94$\times$ & $9^{(1, 0)}$ \\
+\midrule
+\multirow{8}{*}{150} & \multirow{8}{*}{5} & DPA-TS & 1929 & 0.02$\times$ & $5^{(0, 5)}$ & \multirow{8}{*}{150} & \multirow{8}{*}{6} & DPA-TS & 1052 & 0.04$\times$ & $1^{(0, 9)}$ \\
+ &  & DPA-A & 1807 & 0.02$\times$ & $5^{(0, 5)}$ &  &  & DPA-A & 1085 & 0.04$\times$ & $1^{(0, 9)}$ \\
+ &  & \textsc{Smdd} & 34 & 1.00$\times$ & $10$ &  &  & \textsc{Smdd} & 47 & 1.00$\times$ & $10$ \\
+ &  & \textsc{PmddC}(4) & 20 & 1.72$\times$ & $10$ &  &  & \textsc{PmddC}(4) & 26 & 1.86$\times$ & $10$ \\
+ &  & \textsc{PmddC}(8) & 18 & 1.89$\times$ & $10$ &  &  & \textsc{PmddC}(8) & 22 & 2.16$\times$ & $10$ \\
+ &  & \textsc{PmddC}(16) & 16 & 2.11$\times$ & $10$ &  &  & \textsc{PmddC}(16) & 21 & 2.32$\times$ & $10$ \\
+ &  & \textsc{PmddG-TD} & \textbf{10} & 3.35$\times$ & $10$ &  &  & \textsc{PmddG-TD} & \textbf{6} & 8.42$\times$ & $10$ \\
+ &  & \textsc{PmddG} & 11 & 3.17$\times$ & $10$ &  &  & \textsc{PmddG} & 7 & 6.76$\times$ & $10$ \\
+\midrule
+\multirow{8}{*}{150} & \multirow{8}{*}{7} & DPA-TS & -- & -- & $0^{(0, 10)}$ & \multirow{8}{*}{200} & \multirow{8}{*}{3} & DPA-TS & 32 & 5.15$\times$ & $10$ \\
+ &  & DPA-A & -- & -- & $0^{(0, 10)}$ &  &  & DPA-A & \textbf{22} & 7.53$\times$ & $10$ \\
+ &  & \textsc{Smdd} & 184 & 1.00$\times$ & $10$ &  &  & \textsc{Smdd} & 162 & 1.00$\times$ & $1^{(9, 0)}$ \\
+ &  & \textsc{PmddC}(4) & 84 & 2.20$\times$ & $10$ &  &  & \textsc{PmddC}(4) & 93 & 1.75$\times$ & $1^{(9, 0)}$ \\
+ &  & \textsc{PmddC}(8) & 71 & 2.61$\times$ & $10$ &  &  & \textsc{PmddC}(8) & 87 & 1.86$\times$ & $1^{(9, 0)}$ \\
+ &  & \textsc{PmddC}(16) & 96 & 1.91$\times$ & $10$ &  &  & \textsc{PmddC}(16) & 72 & 2.27$\times$ & $1^{(8, 1)}$ \\
+ &  & \textsc{PmddG-TD} & \textbf{9} & 20.88$\times$ & $10$ &  &  & \textsc{PmddG-TD} & -- & -- & $0^{(10, 0)}$ \\
+ &  & \textsc{PmddG} & 17 & 10.98$\times$ & $10$ &  &  & \textsc{PmddG} & -- & -- & $0^{(10, 0)}$ \\
+\midrule
+\multirow{8}{*}{200} & \multirow{8}{*}{4} & DPA-TS & 913 & 0.20$\times$ & $10$ &  &  &  &  &  &  \\
+ &  & DPA-A & 793 & 0.23$\times$ & $10$ &  &  &  &  &  &  \\
+ &  & \textsc{Smdd} & 186 & 1.00$\times$ & $1^{(9, 0)}$ &  &  &  &  &  &  \\
+ &  & \textsc{PmddC}(4) & 80 & 2.34$\times$ & $1^{(9, 0)}$ &  &  &  &  &  &  \\
+ &  & \textsc{PmddC}(8) & 63 & 2.97$\times$ & $1^{(9, 0)}$ &  &  &  &  &  &  \\
+ &  & \textsc{PmddC}(16) & \textbf{45} & 4.12$\times$ & $1^{(9, 0)}$ &  &  &  &  &  &  \\
+ &  & \textsc{PmddG-TD} & -- & -- & $0^{(10, 0)}$ &  &  &  &  &  &  \\
+ &  & \textsc{PmddG} & -- & -- & $0^{(10, 0)}$ &  &  &  &  &  &  \\
+\bottomrule
+\end{tabular}
+}
+\label{tab:mospp_result}
+\end{table*}
+
+
+\end{document}

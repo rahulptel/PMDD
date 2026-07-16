@@ -64,7 +64,7 @@ def dpa_instance_path(instance: Path):
     return instance.with_name(f"{instance.stem}-dpa.lp")
 
 def append_case(lines, config, binary, instance, problem_type, method, dominance):
-    runner = config.get("runner", "pdd")
+    runner = config.get("runner", "pmdd")
     backend = config["backend"]
     cpu_workers = config["workers"]
 
@@ -117,13 +117,13 @@ def generate_table(farm_name, config, project_root):
         if not source_data_root.is_dir():
             continue
 
-        runner = config.get("runner", "pdd")
+        runner = config.get("runner", "pmdd")
         if runner == "baseline-dd":
             binary = binary_base / "baseline" / "dd" / f"multiobj{nobjs}"
         elif runner == "baseline-dpa":
             binary = binary_base / "baseline" / "dpa" / "main"
         else:
-            binary = binary_base / f"multiobj_nobjs{nobjs}"
+            binary = binary_base / "pmdd" / f"multiobj_nobjs{nobjs}"
 
         forced_method = config["forced_method"]
         if forced_method == 0:
@@ -172,7 +172,7 @@ def main():
     script_dir = Path(__file__).resolve().parent
     local_project_root = script_dir.parent
 
-    cc_project_root_str = os.environ.get("PROJECT_ROOT", "/home/rahulpat/scratch/cuMODD")
+    cc_project_root_str = os.environ.get("PROJECT_ROOT", "/home/rahulpat/scratch/PMDD")
     cc_project_root = Path(cc_project_root_str).resolve()
 
     print(f"Generating tables for CC environment (root: {cc_project_root})")
