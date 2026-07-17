@@ -266,6 +266,6 @@ ParetoFrontier *couple_cutsets_cuda(int num_nodes, const thrust::device_vector<i
                                     const thrust::device_vector<int> &d_bu_offsets,
                                     const thrust::device_vector<ObjType> &d_bu_points,
                                     EnumerationStats *stats, std::string *reason,
-                                    long long gpu_max_prod);
+                                    long long gpu_max_prod, bool gpu_ideal_point_prune);
 
 #endif

@@ -403,7 +403,7 @@ ParetoFrontier *couple_cutsets_cuda(int cutset_nodes,
                                     const thrust::device_vector<int> &d_bu_offsets,
                                     const thrust::device_vector<ObjType> &d_bu_points,
                                     EnumerationStats *stats, std::string *reason,
-                                    long long gpu_max_prod) {
+                                    long long gpu_max_prod, bool gpu_ideal_point_prune) {
 
     clock_t t0 = clock();
 
@@ -446,10 +446,12 @@ ParetoFrontier *couple_cutsets_cuda(int cutset_nodes,
     // the running frontier already dominates-or-ties everything that node could
     // ever produce (improvements.md 3.1).
     thrust::device_vector<ObjType> d_ub_points(d_nz_nodes.size() * NOBJS, 0);
-    if (!d_nz_nodes.empty()) {
+    if (gpu_ideal_point_prune && !d_nz_nodes.empty()) {
         compute_node_ub_kernel<<<static_cast<int>(d_nz_nodes.size()), kThreadsPerBlock>>>(
-            thrust::raw_pointer_cast(d_td_points.data()), thrust::raw_pointer_cast(d_td_offsets.data()),
-            thrust::raw_pointer_cast(d_bu_points.data()), thrust::raw_pointer_cast(d_bu_offsets.data()),
+            thrust::raw_pointer_cast(d_td_points.data()),
+            thrust::raw_pointer_cast(d_td_offsets.data()),
+            thrust::raw_pointer_cast(d_bu_points.data()),
+            thrust::raw_pointer_cast(d_bu_offsets.data()),
             thrust::raw_pointer_cast(d_nz_nodes.data()), static_cast<int>(d_nz_nodes.size()),
             thrust::raw_pointer_cast(d_ub_points.data()));
         if (!sync_kernel("compute_node_ub", reason))
@@ -560,11 +562,12 @@ ParetoFrontier *couple_cutsets_cuda(int cutset_nodes,
         // batch's survivors here extends that same guarantee. Cost per batch drops from
         // O(remaining x frontier_size) to O(remaining x batch_survivors) -- the former
         // grows unboundedly over the run, the latter does not.
-        if (batch_frontier_size > 0 && batch_end < static_cast<int>(nz_nodes.size())) {
+        if (gpu_ideal_point_prune && batch_frontier_size > 0 &&
+            batch_end < static_cast<int>(nz_nodes.size())) {
             const int remaining = static_cast<int>(nz_nodes.size()) - batch_end;
             thrust::device_vector<int> ub_alive(remaining, 0);
             mark_dominated_or_equal_by_frontier_kernel<<<ceil_div(remaining, kThreadsPerBlock),
-                                                          kThreadsPerBlock>>>(
+                                                         kThreadsPerBlock>>>(
                 thrust::raw_pointer_cast(d_ub_points.data()) + batch_end * NOBJS, remaining,
                 thrust::raw_pointer_cast(d_batch_points.data()), batch_frontier_size,
                 thrust::raw_pointer_cast(ub_alive.data()));
@@ -582,7 +585,7 @@ ParetoFrontier *couple_cutsets_cuda(int cutset_nodes,
                 }
                 d_ub_points.resize(batch_end * NOBJS + kept * NOBJS);
                 thrust::copy(ub_suffix.begin(), ub_suffix.end(),
-                            d_ub_points.begin() + batch_end * NOBJS);
+                             d_ub_points.begin() + batch_end * NOBJS);
 
                 thrust::host_vector<int> h_alive = ub_alive;
                 int w = batch_end;

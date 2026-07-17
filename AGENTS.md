@@ -83,6 +83,12 @@ Backend options:
 - GPU coupled batch product cap can be overridden with `--max-prod <N>`.
 - `--max-prod` accepts plain positive integers or suffixes `K`, `M`, `B`
   for decimal thousands/millions/billions; default is `625K`.
+- `--ideal-point-prune` (GPU only, method=3 coupled path, default off): skips
+  whole cutset nodes in the join once the running frontier already
+  dominates-or-ties the node's ideal/utopia point (`max(td) + max(bu)`
+  componentwise). Exact, not a heuristic. Net win on instances with a lot of
+  cross-node dominance (e.g. set packing); small overhead (~3%) on instances
+  where nothing is ever prunable (e.g. TSP), hence opt-in rather than default.
 
 Output options:
 - `--save-frontier` writes `<input_stem>.frontier.csv.gz`.

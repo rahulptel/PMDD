@@ -148,11 +148,15 @@ GPU options:
 ```bash
 --max-cand <N>
 --max-prod <N>
+--ideal-point-prune
 ```
 
 `--max-cand` defaults to `20M`; `--max-prod` defaults to `625K`. Both accept
 plain positive integers or `K`, `M`, `B` decimal suffixes. The token `cuda` is
-intentionally rejected; use `gpu`.
+intentionally rejected; use `gpu`. `--ideal-point-prune` (method=3 coupled path
+only, default off) skips whole cutset nodes once the running frontier already
+dominates their ideal point; exact, but only a net win on instances with heavy
+cross-node dominance.
 
 Output options:
 

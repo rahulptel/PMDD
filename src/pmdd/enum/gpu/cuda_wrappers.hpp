@@ -14,8 +14,9 @@ ParetoFrontier *topdown_cuda_enumerate(BDD *bdd, bool maximization, const int pr
 ParetoFrontier *topdown_mdd_cuda_enumerate(MDD *mdd, EnumerationStats *stats, std::string *reason,
                                            long long gpu_batch_size);
 ParetoFrontier *coupled_cuda_enumerate(MDD *mdd, EnumerationStats *stats, std::string *reason,
-                                       long long gpu_batch_size, long long gpu_max_prod);
+                                       long long gpu_batch_size, long long gpu_max_prod,
+                                       bool gpu_ideal_point_prune);
 ParetoFrontier *coupled_bdd_cuda_enumerate(BDD *bdd, bool maximization, const int problem_type,
                                            const int state_dominance, EnumerationStats *stats,
                                            std::string *reason, long long gpu_batch_size,
-                                           long long gpu_max_prod);
+                                           long long gpu_max_prod, bool gpu_ideal_point_prune);

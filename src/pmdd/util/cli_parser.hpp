@@ -21,6 +21,7 @@ struct CliOptions {
     int cpu_threads;
     long long gpu_batch_size;
     long long gpu_max_prod;
+    bool gpu_ideal_point_prune;
     bool save_frontier;
     std::string frontier_out_path;
     bool save_stats;

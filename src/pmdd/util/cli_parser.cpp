@@ -16,7 +16,7 @@ using namespace std;
 CliOptions::CliOptions()
     : problem_type(0), method(0), state_dominance(0), backend(BACKEND_CPU), cpu_threads(1),
       gpu_batch_size(DEFAULT_GPU_BATCH_SIZE), gpu_max_prod(DEFAULT_GPU_MAX_PROD),
-      save_frontier(false), save_stats(false) {}
+      gpu_ideal_point_prune(false), save_frontier(false), save_stats(false) {}
 
 static string derive_default_frontier_path(const string &input_path) {
     string base = input_path;
@@ -173,6 +173,8 @@ void print_usage() {
         << "\t\t--max-cand <N>: GPU candidate batch cap; supports K, M, B suffixes (default 20M)\n";
     cout << "\t\t--max-prod <N>: GPU coupled batch product cap; supports K, M, B suffixes (default "
             "625K)\n";
+    cout << "\t\t--ideal-point-prune: skip GPU coupled cutset nodes whose ideal point is already "
+            "dominated by the running frontier (method=3, gpu only; default off)\n";
     cout << "\t\toptional arguments can be provided in any order\n";
 
     cout << endl;
@@ -321,6 +323,14 @@ bool parse_cli_args(int argc, char *argv[], CliOptions *out, string *error) {
                 return false;
             }
             gpu_max_prod_set = true;
+        } else if (token == "--ideal-point-prune") {
+            if (opts.gpu_ideal_point_prune) {
+                if (error != NULL) {
+                    *error = "Error - --ideal-point-prune provided multiple times.";
+                }
+                return false;
+            }
+            opts.gpu_ideal_point_prune = true;
         } else if (token == "cpu" || token == "gpu") {
             if (backend_from_named) {
                 if (error != NULL) {
@@ -448,6 +458,12 @@ bool parse_cli_args(int argc, char *argv[], CliOptions *out, string *error) {
     if (opts.backend == BACKEND_CPU && gpu_max_prod_set) {
         if (error != NULL) {
             *error = "Error - --max-prod is only valid with backend=gpu.";
+        }
+        return false;
+    }
+    if (opts.backend == BACKEND_CPU && opts.gpu_ideal_point_prune) {
+        if (error != NULL) {
+            *error = "Error - --ideal-point-prune is only valid with backend=gpu.";
         }
         return false;
     }
