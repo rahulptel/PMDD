@@ -100,9 +100,17 @@ __global__ void materialize_cutset_products_kernel(const ObjType *td_pts, const 
 // ub[o] = max_td[o] + max_bu[o]. Every actual product td[i]+bu[j] of that node is
 // componentwise <= this point, so if a frontier point dominates-or-ties ub, it
 // dominates-or-ties every product the node could ever produce.
+//
+// ub_out is written per sorted position j (used by the node-level skip, whose companion
+// array is compacted in that order). max_td_out/max_bu_out are the two halves of the
+// bound, written per *absolute* node id -- these feed the row-level bound (t + max_bu)
+// and column-level bound (max_td + bu), and node-indexing keeps them stable regardless
+// of the node-level check's per-batch compaction of the sorted arrays. Any of the three
+// outputs may be null when its consumer is disabled.
 __global__ void compute_node_ub_kernel(const ObjType *td_pts, const int *td_off,
                                        const ObjType *bu_pts, const int *bu_off,
-                                       const int *nz_nodes, int num_nz_nodes, ObjType *ub_out) {
+                                       const int *nz_nodes, int num_nz_nodes, ObjType *ub_out,
+                                       ObjType *max_td_out, ObjType *max_bu_out) {
     const int j = blockIdx.x;
     if (j >= num_nz_nodes)
         return;
@@ -150,8 +158,68 @@ __global__ void compute_node_ub_kernel(const ObjType *td_pts, const int *td_off,
     }
     if (threadIdx.x == 0) {
 #pragma unroll
+        for (int o = 0; o < NOBJS; ++o) {
+            if (ub_out != NULL)
+                ub_out[j * NOBJS + o] = sh_td[o] + sh_bu[o];
+            if (max_td_out != NULL)
+                max_td_out[node * NOBJS + o] = sh_td[o];
+            if (max_bu_out != NULL)
+                max_bu_out[node * NOBJS + o] = sh_bu[o];
+        }
+    }
+}
+
+// Build per-axis ideal-point bounds for a batch. For row pruning the "axis" is td: each
+// row (fixed td point t) is bounded componentwise by t + max_bu[node], since every
+// product t + bu[j] <= t + max_bu[node]. For column pruning the axis is bu, bounded by
+// max_td[node] + bu. One block per batch node, striding over that node's axis points;
+// output is a flat array of bound points (one per row, or one per column) that the
+// existing frontier-dominance kernel then tests, exactly like real product points.
+__global__ void build_axis_bounds_kernel(const ObjType *axis_pts, const int *axis_off,
+                                         const int *axis_sz, const int *axis_bound_off,
+                                         const ObjType *node_other_max, const int *bnode_ids,
+                                         int num_nodes, ObjType *out) {
+    const int node = blockIdx.x;
+    if (node >= num_nodes)
+        return;
+    const int n = axis_sz[node];
+    const int abase = axis_off[node];
+    const int obase = axis_bound_off[node];
+    const int nid = bnode_ids[node];
+    for (int k = threadIdx.x; k < n; k += blockDim.x) {
+#pragma unroll
         for (int o = 0; o < NOBJS; ++o)
-            ub_out[j * NOBJS + o] = sh_td[o] + sh_bu[o];
+            out[(obase + k) * NOBJS + o] =
+                axis_pts[(abase + k) * NOBJS + o] + node_other_max[nid * NOBJS + o];
+    }
+}
+
+// Fold row/column bound verdicts down onto individual products. Product p of a node maps
+// to (ti = p / bu_sz, bi = p % bu_sz); it survives only if its row bound and its column
+// bound both survived. row_alive / col_alive may be null when that axis is disabled (then
+// that axis does not constrain). One block per batch node, mirroring the materialize
+// kernel's launch shape and product indexing.
+__global__ void mark_rowcol_pruned_products_kernel(const int *prod_off, const int *bu_sz,
+                                                   const int *row_bound_off,
+                                                   const int *col_bound_off, const int *row_alive,
+                                                   const int *col_alive, int num_nodes,
+                                                   int *prod_alive) {
+    const int node = blockIdx.x;
+    if (node >= num_nodes)
+        return;
+    const int bs = bu_sz[node];
+    const int total = prod_off[node + 1] - prod_off[node];
+    const int obase = prod_off[node];
+    const int rbase = row_bound_off[node];
+    const int cbase = col_bound_off[node];
+    for (int p = threadIdx.x; p < total; p += blockDim.x) {
+        const int ti = p / bs, bi = p % bs;
+        int alive = 1;
+        if (row_alive != NULL && !row_alive[rbase + ti])
+            alive = 0;
+        if (col_alive != NULL && !col_alive[cbase + bi])
+            alive = 0;
+        prod_alive[obase + p] = alive;
     }
 }
 
@@ -403,7 +471,8 @@ ParetoFrontier *couple_cutsets_cuda(int cutset_nodes,
                                     const thrust::device_vector<int> &d_bu_offsets,
                                     const thrust::device_vector<ObjType> &d_bu_points,
                                     EnumerationStats *stats, std::string *reason,
-                                    long long gpu_max_prod, bool gpu_ideal_point_prune) {
+                                    long long gpu_max_prod, bool gpu_ideal_point_prune,
+                                    bool gpu_row_prune, bool gpu_col_prune) {
 
     clock_t t0 = clock();
 
@@ -441,19 +510,26 @@ ParetoFrontier *couple_cutsets_cuda(int cutset_nodes,
     thrust::sort_by_key(d_nz_scores.begin(), d_nz_scores.end(), d_nz_nodes.begin(),
                         thrust::greater<long long>());
 
-    // Ideal/utopia product point per node, in the same sorted order as d_nz_nodes:
-    // ub[j] = max_td[node_j] + max_bu[node_j]. Used to skip whole nodes below once
-    // the running frontier already dominates-or-ties everything that node could
-    // ever produce (improvements.md 3.1).
-    thrust::device_vector<ObjType> d_ub_points(d_nz_nodes.size() * NOBJS, 0);
-    if (gpu_ideal_point_prune && !d_nz_nodes.empty()) {
+    // Per-node ideal-point bounds, computed once (improvements.md 3.1 and its row/column
+    // refinement). Node-level: ub[j] = max_td[node_j] + max_bu[node_j] in sorted order,
+    // used to skip whole nodes below. Row/column-level: the two halves max_td[node] and
+    // max_bu[node] in *absolute* node-id order, used to bound a whole product row
+    // (t + max_bu) or column (max_td + bu) and drop it before materializing. Each array is
+    // allocated (and its kernel output enabled) only for the levels actually requested.
+    thrust::device_vector<ObjType> d_ub_points(
+        gpu_ideal_point_prune ? d_nz_nodes.size() * NOBJS : 0, 0);
+    thrust::device_vector<ObjType> d_node_max_td(gpu_col_prune ? cutset_nodes * NOBJS : 0, 0);
+    thrust::device_vector<ObjType> d_node_max_bu(gpu_row_prune ? cutset_nodes * NOBJS : 0, 0);
+    if ((gpu_ideal_point_prune || gpu_row_prune || gpu_col_prune) && !d_nz_nodes.empty()) {
         compute_node_ub_kernel<<<static_cast<int>(d_nz_nodes.size()), kThreadsPerBlock>>>(
             thrust::raw_pointer_cast(d_td_points.data()),
             thrust::raw_pointer_cast(d_td_offsets.data()),
             thrust::raw_pointer_cast(d_bu_points.data()),
             thrust::raw_pointer_cast(d_bu_offsets.data()),
             thrust::raw_pointer_cast(d_nz_nodes.data()), static_cast<int>(d_nz_nodes.size()),
-            thrust::raw_pointer_cast(d_ub_points.data()));
+            gpu_ideal_point_prune ? thrust::raw_pointer_cast(d_ub_points.data()) : NULL,
+            gpu_col_prune ? thrust::raw_pointer_cast(d_node_max_td.data()) : NULL,
+            gpu_row_prune ? thrust::raw_pointer_cast(d_node_max_bu.data()) : NULL);
         if (!sync_kernel("compute_node_ub", reason))
             return NULL;
     }
@@ -509,6 +585,23 @@ ParetoFrontier *couple_cutsets_cuda(int cutset_nodes,
         thrust::device_vector<int> d_bbu_sz(h_bbu_sz.begin(), h_bbu_sz.end());
         thrust::device_vector<int> d_bprod_off(h_bprod_off.begin(), h_bprod_off.end());
 
+        // Row/column bound bookkeeping (only when the corresponding fine-grained prune is
+        // on): absolute node ids for indexing the node-keyed max arrays, plus contiguous
+        // row (per td point) and column (per bu point) index spaces over the batch.
+        const bool rowcol_prune = gpu_row_prune || gpu_col_prune;
+        std::vector<int> h_bnode_ids;
+        std::vector<int> h_brow_off, h_bcol_off;
+        if (rowcol_prune) {
+            h_bnode_ids.resize(batch_node_count);
+            h_brow_off.assign(batch_node_count + 1, 0);
+            h_bcol_off.assign(batch_node_count + 1, 0);
+            for (int j = 0; j < batch_node_count; ++j) {
+                h_bnode_ids[j] = nz_nodes[batch_begin + j];
+                h_brow_off[j + 1] = h_brow_off[j] + h_btd_sz[j];
+                h_bcol_off[j + 1] = h_bcol_off[j] + h_bbu_sz[j];
+            }
+        }
+
         thrust::device_vector<ObjType> d_batch_points(batch_product_count * NOBJS, 0);
         materialize_cutset_products_kernel<<<batch_node_count, kThreadsPerBlock>>>(
             thrust::raw_pointer_cast(d_td_points.data()),
@@ -521,7 +614,88 @@ ParetoFrontier *couple_cutsets_cuda(int cutset_nodes,
             return NULL;
 
         int batch_frontier_size = batch_product_count;
-        if (frontier_size > 0) {
+
+        // Row/column ideal-point pre-filter (improvements.md 3.1 refinement): before the
+        // per-product frontier filter and the O(B^2) self-prune run, drop whole product
+        // rows/columns whose ideal bound is already dominated by the running frontier.
+        // Exact and simple (no transitivity argument, unlike the node-level cross-batch
+        // check): every product t + bu[j] <= t + max_bu[node] componentwise, so if the
+        // frontier dominates-or-ties the row bound it dominates-or-ties every product in
+        // the row (symmetric for columns). This is a conservative pre-filter against the
+        // current frontier -- it only removes provably-dominated products; whatever
+        // survives still goes through the normal per-product filter below. The win is that
+        // the expensive per-product filter and self-prune then operate on a smaller B.
+        if (frontier_size > 0 && rowcol_prune) {
+            thrust::device_vector<int> d_bnode_ids(h_bnode_ids.begin(), h_bnode_ids.end());
+            thrust::device_vector<int> d_brow_off(h_brow_off.begin(), h_brow_off.end());
+            thrust::device_vector<int> d_bcol_off(h_bcol_off.begin(), h_bcol_off.end());
+
+            thrust::device_vector<int> row_alive, col_alive;
+            if (gpu_row_prune) {
+                const int total_rows = h_brow_off[batch_node_count];
+                thrust::device_vector<ObjType> d_row_bounds(total_rows * NOBJS, 0);
+                build_axis_bounds_kernel<<<batch_node_count, kThreadsPerBlock>>>(
+                    thrust::raw_pointer_cast(d_td_points.data()),
+                    thrust::raw_pointer_cast(d_btd_off.data()),
+                    thrust::raw_pointer_cast(d_btd_sz.data()),
+                    thrust::raw_pointer_cast(d_brow_off.data()),
+                    thrust::raw_pointer_cast(d_node_max_bu.data()),
+                    thrust::raw_pointer_cast(d_bnode_ids.data()), batch_node_count,
+                    thrust::raw_pointer_cast(d_row_bounds.data()));
+                if (!sync_kernel("build_row_bounds", reason))
+                    return NULL;
+                row_alive.assign(total_rows, 0);
+                mark_dominated_or_equal_by_frontier_kernel<<<ceil_div(total_rows, kThreadsPerBlock),
+                                                             kThreadsPerBlock>>>(
+                    thrust::raw_pointer_cast(d_row_bounds.data()), total_rows,
+                    thrust::raw_pointer_cast(d_frontier_pts.data()), frontier_size,
+                    thrust::raw_pointer_cast(row_alive.data()));
+                if (!sync_kernel("row_prune_check", reason))
+                    return NULL;
+            }
+            if (gpu_col_prune) {
+                const int total_cols = h_bcol_off[batch_node_count];
+                thrust::device_vector<ObjType> d_col_bounds(total_cols * NOBJS, 0);
+                build_axis_bounds_kernel<<<batch_node_count, kThreadsPerBlock>>>(
+                    thrust::raw_pointer_cast(d_bu_points.data()),
+                    thrust::raw_pointer_cast(d_bbu_off.data()),
+                    thrust::raw_pointer_cast(d_bbu_sz.data()),
+                    thrust::raw_pointer_cast(d_bcol_off.data()),
+                    thrust::raw_pointer_cast(d_node_max_td.data()),
+                    thrust::raw_pointer_cast(d_bnode_ids.data()), batch_node_count,
+                    thrust::raw_pointer_cast(d_col_bounds.data()));
+                if (!sync_kernel("build_col_bounds", reason))
+                    return NULL;
+                col_alive.assign(total_cols, 0);
+                mark_dominated_or_equal_by_frontier_kernel<<<ceil_div(total_cols, kThreadsPerBlock),
+                                                             kThreadsPerBlock>>>(
+                    thrust::raw_pointer_cast(d_col_bounds.data()), total_cols,
+                    thrust::raw_pointer_cast(d_frontier_pts.data()), frontier_size,
+                    thrust::raw_pointer_cast(col_alive.data()));
+                if (!sync_kernel("col_prune_check", reason))
+                    return NULL;
+            }
+
+            thrust::device_vector<int> prod_alive(batch_frontier_size, 1);
+            mark_rowcol_pruned_products_kernel<<<batch_node_count, kThreadsPerBlock>>>(
+                thrust::raw_pointer_cast(d_bprod_off.data()),
+                thrust::raw_pointer_cast(d_bbu_sz.data()),
+                thrust::raw_pointer_cast(d_brow_off.data()),
+                thrust::raw_pointer_cast(d_bcol_off.data()),
+                gpu_row_prune ? thrust::raw_pointer_cast(row_alive.data()) : NULL,
+                gpu_col_prune ? thrust::raw_pointer_cast(col_alive.data()) : NULL, batch_node_count,
+                thrust::raw_pointer_cast(prod_alive.data()));
+            if (!sync_kernel("rowcol_prune_mark", reason))
+                return NULL;
+
+            const int kept_pre = thrust::reduce(prod_alive.begin(), prod_alive.end(), 0);
+            if (!compact_points_by_alive(d_batch_points, batch_frontier_size, prod_alive, kept_pre,
+                                         "rowcol_prune_compact", reason)) {
+                return NULL;
+            }
+        }
+
+        if (frontier_size > 0 && batch_frontier_size > 0) {
             thrust::device_vector<int> alive_batch(batch_frontier_size, 0);
             mark_dominated_or_equal_by_frontier_kernel<<<
                 ceil_div(batch_frontier_size, kThreadsPerBlock), kThreadsPerBlock>>>(

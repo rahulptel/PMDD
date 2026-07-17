@@ -37,7 +37,8 @@ struct MultiobjEnum {
         BDD *bdd, bool maximization = true, const int problem_type = -1,
         const int state_dominance = 0, EnumerationStats *stats = NULL, std::string *reason = NULL,
         long long gpu_batch_size = DEFAULT_GPU_BATCH_SIZE,
-        long long gpu_max_prod = DEFAULT_GPU_MAX_PROD, bool gpu_ideal_point_prune = false);
+        long long gpu_max_prod = DEFAULT_GPU_MAX_PROD, bool gpu_ideal_point_prune = false,
+        bool gpu_row_prune = false, bool gpu_col_prune = false);
 
     // Find pareto frontier from top-down approach / CUDA for MDD
     static ParetoFrontier *
@@ -91,7 +92,8 @@ struct MultiobjEnum {
     static ParetoFrontier *pareto_frontier_dynamic_layer_cutset_cuda(
         MDD *mdd, EnumerationStats *stats = NULL, std::string *reason = NULL,
         long long gpu_batch_size = DEFAULT_GPU_BATCH_SIZE,
-        long long gpu_max_prod = DEFAULT_GPU_MAX_PROD, bool gpu_ideal_point_prune = false);
+        long long gpu_max_prod = DEFAULT_GPU_MAX_PROD, bool gpu_ideal_point_prune = false,
+        bool gpu_row_prune = false, bool gpu_col_prune = false);
 };
 
 #endif

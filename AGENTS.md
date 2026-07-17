@@ -89,6 +89,14 @@ Backend options:
   componentwise). Exact, not a heuristic. Net win on instances with a lot of
   cross-node dominance (e.g. set packing); small overhead (~3%) on instances
   where nothing is ever prunable (e.g. TSP), hence opt-in rather than default.
+- `--row-prune` / `--col-prune` (GPU only, method=3, default off): finer-grained
+  ideal-point pruning. `--row-prune` drops a whole product row (fixed td point
+  `t`) before materializing it once the frontier dominates-or-ties its bound
+  `t + max(bu)`; `--col-prune` does the same per column (`max(td) + bu`). Exact
+  conservative pre-filters, independent of and composable with each other and
+  with `--ideal-point-prune`. These reach the many cases where the single
+  node-level ideal point is too loose to prune (e.g. TSP, where node-level prunes
+  0 nodes but individual rows/columns may still be dominated).
 
 Output options:
 - `--save-frontier` writes `<input_stem>.frontier.csv.gz`.

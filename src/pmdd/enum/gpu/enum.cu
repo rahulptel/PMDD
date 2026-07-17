@@ -23,7 +23,8 @@ ParetoFrontier *enumerate_mdd_topdown(MDD *mdd, EnumerationStats *stats, std::st
 
 ParetoFrontier *enumerate_mdd_coupled(MDD *mdd, EnumerationStats *stats, std::string *reason,
                                       long long gpu_batch_size, long long gpu_max_prod,
-                                      bool gpu_ideal_point_prune);
+                                      bool gpu_ideal_point_prune, bool gpu_row_prune,
+                                      bool gpu_col_prune);
 
 namespace {
 
@@ -73,12 +74,13 @@ ParetoFrontier *topdown_mdd_cuda_enumerate(MDD *mdd, EnumerationStats *stats, st
 
 ParetoFrontier *coupled_cuda_enumerate(MDD *mdd, EnumerationStats *stats, std::string *reason,
                                        long long gpu_batch_size, long long gpu_max_prod,
-                                       bool gpu_ideal_point_prune) {
+                                       bool gpu_ideal_point_prune, bool gpu_row_prune,
+                                       bool gpu_col_prune) {
     if (!prepare_cuda_device(reason)) {
         return NULL;
     }
     return enumerate_mdd_coupled(mdd, stats, reason, gpu_batch_size, gpu_max_prod,
-                                 gpu_ideal_point_prune);
+                                 gpu_ideal_point_prune, gpu_row_prune, gpu_col_prune);
 }
 
 // ----------------------------------------------------------
@@ -297,7 +299,8 @@ ParetoFrontier *enumerate_mdd_topdown(MDD *mdd, EnumerationStats *stats, std::st
 
 ParetoFrontier *enumerate_mdd_coupled(MDD *mdd, EnumerationStats *stats, std::string *reason,
                                       long long gpu_batch_size, long long gpu_max_prod,
-                                      bool gpu_ideal_point_prune) {
+                                      bool gpu_ideal_point_prune, bool gpu_row_prune,
+                                      bool gpu_col_prune) {
     if (mdd == NULL) {
         set_reason(reason, "MDD is NULL");
         return NULL;
@@ -436,7 +439,8 @@ ParetoFrontier *enumerate_mdd_coupled(MDD *mdd, EnumerationStats *stats, std::st
 
     // 4. Cutset coupling
     return couple_cutsets_cuda(packed[layer_td].num_nodes, d_td_offsets, d_td_points, d_bu_offsets,
-                               d_bu_points, stats, reason, gpu_max_prod, gpu_ideal_point_prune);
+                               d_bu_points, stats, reason, gpu_max_prod, gpu_ideal_point_prune,
+                               gpu_row_prune, gpu_col_prune);
 }
 
 void pack_bdd_layers(BDD *bdd, std::vector<PackedBDDLayer> &packed, bool pack_bottom_up,
@@ -599,7 +603,8 @@ void pack_bdd_layers(BDD *bdd, std::vector<PackedBDDLayer> &packed, bool pack_bo
 ParetoFrontier *coupled_bdd_cuda_enumerate(BDD *bdd, bool maximization, const int problem_type,
                                            const int state_dominance, EnumerationStats *stats,
                                            std::string *reason, long long gpu_batch_size,
-                                           long long gpu_max_prod, bool gpu_ideal_point_prune) {
+                                           long long gpu_max_prod, bool gpu_ideal_point_prune,
+                                           bool gpu_row_prune, bool gpu_col_prune) {
     if (!prepare_cuda_device(reason)) {
         return NULL;
     }
@@ -745,9 +750,9 @@ ParetoFrontier *coupled_bdd_cuda_enumerate(BDD *bdd, bool maximization, const in
         stats->layer_coupling = layer_td;
 
     // 4. Cutset coupling
-    ParetoFrontier *res =
-        couple_cutsets_cuda(packed[layer_td].num_nodes, d_td_offsets, d_td_points, d_bu_offsets,
-                            d_bu_points, stats, reason, gpu_max_prod, gpu_ideal_point_prune);
+    ParetoFrontier *res = couple_cutsets_cuda(
+        packed[layer_td].num_nodes, d_td_offsets, d_td_points, d_bu_offsets, d_bu_points, stats,
+        reason, gpu_max_prod, gpu_ideal_point_prune, gpu_row_prune, gpu_col_prune);
 
     if (stats != NULL && res != NULL) {
         if (sample_gpu_memory_peak(reason, gpu_mem_baseline_used_bytes, &gpu_mem_peak_used_bytes,

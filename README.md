@@ -149,6 +149,8 @@ GPU options:
 --max-cand <N>
 --max-prod <N>
 --ideal-point-prune
+--row-prune
+--col-prune
 ```
 
 `--max-cand` defaults to `20M`; `--max-prod` defaults to `625K`. Both accept
@@ -156,7 +158,11 @@ plain positive integers or `K`, `M`, `B` decimal suffixes. The token `cuda` is
 intentionally rejected; use `gpu`. `--ideal-point-prune` (method=3 coupled path
 only, default off) skips whole cutset nodes once the running frontier already
 dominates their ideal point; exact, but only a net win on instances with heavy
-cross-node dominance.
+cross-node dominance. `--row-prune` and `--col-prune` (also method=3, gpu-only,
+default off) are the finer-grained variants: they drop individual dominated
+product rows (`t + max(bu)`) or columns (`max(td) + bu`) before materializing
+them. All three are exact and independently composable; the row/column variants
+help on instances where the single node-level ideal point is too loose to prune.
 
 Output options:
 

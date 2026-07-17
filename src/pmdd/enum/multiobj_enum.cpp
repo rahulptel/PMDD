@@ -86,7 +86,7 @@ MultiobjEnum::pareto_frontier_topdown_cuda(BDD *bdd, bool maximization, const in
 ParetoFrontier *MultiobjEnum::pareto_frontier_dynamic_layer_cutset_cuda(
     BDD *bdd, bool maximization, const int problem_type, const int state_dominance,
     EnumerationStats *stats, std::string *reason, long long gpu_batch_size, long long gpu_max_prod,
-    bool gpu_ideal_point_prune) {
+    bool gpu_ideal_point_prune, bool gpu_row_prune, bool gpu_col_prune) {
     if (stats != NULL) {
         stats->cpu_state_dominance_s = 0.0;
         stats->dominance_filtered_total = 0;
@@ -94,8 +94,8 @@ ParetoFrontier *MultiobjEnum::pareto_frontier_dynamic_layer_cutset_cuda(
         reset_cpu_metrics_stats(stats);
     }
     return ::coupled_bdd_cuda_enumerate(bdd, maximization, problem_type, state_dominance, stats,
-                                        reason, gpu_batch_size, gpu_max_prod,
-                                        gpu_ideal_point_prune);
+                                        reason, gpu_batch_size, gpu_max_prod, gpu_ideal_point_prune,
+                                        gpu_row_prune, gpu_col_prune);
 }
 
 ParetoFrontier *MultiobjEnum::pareto_frontier_topdown_cuda(MDD *mdd, EnumerationStats *stats,
@@ -112,7 +112,7 @@ ParetoFrontier *MultiobjEnum::pareto_frontier_topdown_cuda(MDD *mdd, Enumeration
 
 ParetoFrontier *MultiobjEnum::pareto_frontier_dynamic_layer_cutset_cuda(
     MDD *mdd, EnumerationStats *stats, std::string *reason, long long gpu_batch_size,
-    long long gpu_max_prod, bool gpu_ideal_point_prune) {
+    long long gpu_max_prod, bool gpu_ideal_point_prune, bool gpu_row_prune, bool gpu_col_prune) {
     if (stats != NULL) {
         stats->cpu_state_dominance_s = 0.0;
         stats->dominance_filtered_total = 0;
@@ -120,5 +120,5 @@ ParetoFrontier *MultiobjEnum::pareto_frontier_dynamic_layer_cutset_cuda(
         reset_cpu_metrics_stats(stats);
     }
     return ::coupled_cuda_enumerate(mdd, stats, reason, gpu_batch_size, gpu_max_prod,
-                                    gpu_ideal_point_prune);
+                                    gpu_ideal_point_prune, gpu_row_prune, gpu_col_prune);
 }

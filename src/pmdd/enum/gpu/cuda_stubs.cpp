@@ -34,12 +34,15 @@ ParetoFrontier *topdown_mdd_cuda_enumerate(MDD *mdd, EnumerationStats *stats, st
 
 ParetoFrontier *coupled_cuda_enumerate(MDD *mdd, EnumerationStats *stats, std::string *reason,
                                        long long gpu_batch_size, long long gpu_max_prod,
-                                       bool gpu_ideal_point_prune) {
+                                       bool gpu_ideal_point_prune, bool gpu_row_prune,
+                                       bool gpu_col_prune) {
     (void)mdd;
     (void)stats;
     (void)gpu_batch_size;
     (void)gpu_max_prod;
     (void)gpu_ideal_point_prune;
+    (void)gpu_row_prune;
+    (void)gpu_col_prune;
     if (reason != NULL) {
         *reason = "GPU backend requested but binary was built without CUDA support";
     }
@@ -49,7 +52,8 @@ ParetoFrontier *coupled_cuda_enumerate(MDD *mdd, EnumerationStats *stats, std::s
 ParetoFrontier *coupled_bdd_cuda_enumerate(BDD *bdd, bool maximization, const int problem_type,
                                            const int state_dominance, EnumerationStats *stats,
                                            std::string *reason, long long gpu_batch_size,
-                                           long long gpu_max_prod, bool gpu_ideal_point_prune) {
+                                           long long gpu_max_prod, bool gpu_ideal_point_prune,
+                                           bool gpu_row_prune, bool gpu_col_prune) {
     (void)bdd;
     (void)maximization;
     (void)problem_type;
@@ -58,6 +62,8 @@ ParetoFrontier *coupled_bdd_cuda_enumerate(BDD *bdd, bool maximization, const in
     (void)gpu_batch_size;
     (void)gpu_max_prod;
     (void)gpu_ideal_point_prune;
+    (void)gpu_row_prune;
+    (void)gpu_col_prune;
     if (reason != NULL) {
         *reason = "GPU backend requested but binary was built without CUDA support";
     }
