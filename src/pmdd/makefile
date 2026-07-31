@@ -68,7 +68,7 @@ CUDAFLAGS = -std=c++14 -O3 -DUSE_CUDA -DNOBJS=$(NUM_OBJS) -I$(BOOSTDIR)/include
 LDFLAGS += -lcudart
 endif
 
-BIN_DIR = ../../resources/bin/pdd
+BIN_DIR = ../../resources/bin/pmdd
 EXECUTABLE_NAME = multiobj_nobjs$(NUM_OBJS)
 EXECUTABLE = $(BIN_DIR)/$(EXECUTABLE_NAME)
 

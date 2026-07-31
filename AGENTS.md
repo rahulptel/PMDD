@@ -1,4 +1,4 @@
-# cuMODD Agent Guide
+# PMDD Agent Guide
 
 ## 0) Working Style
 - Be direct, technical, and concise. This is research code, not product code.
@@ -10,44 +10,44 @@
 
 ## 1) Repository Purpose
 - This is a C++ decision-diagram codebase for multiobjective optimization.
-- The active parallel decision-diagram implementation lives in `src/pdd/`.
+- The active parallel decision-diagram implementation lives in `src/pmdd/`.
 - Benchmark baselines live in `src/baseline/`:
   - `dd/`: older decision-diagram/network-model baseline.
   - `dpa/`: defining-point algorithm baseline.
-- Main PDD executable pattern: `multiobj_nobjs<NUM_OBJS>`, for example `multiobj_nobjs3`.
+- Main PMDD executable pattern: `multiobj_nobjs<NUM_OBJS>`, for example `multiobj_nobjs3`.
 - Core idea: build an exact BDD or MDD, then enumerate the Pareto frontier by dynamic-programming style frontier propagation.
-- Supported PDD problem types in `src/pdd/main.cpp`:
+- Supported PMDD problem types in `src/pmdd/main.cpp`:
   - `1`: Knapsack, represented with a BDD.
   - `2`: Set packing, converted to an independent-set BDD.
   - `3`: TSP, represented with an MDD.
-- Older problem types from related branches, such as set covering, portfolio, and absolute-value models, are not wired into the PDD executable.
+- Older problem types from related branches, such as set covering, portfolio, and absolute-value models, are not wired into the PMDD executable.
 
 ## 2) Build and Environment
-- PDD build system: `src/pdd/makefile`.
-- Run PDD builds from `src/pdd`, or from the repo root with `make -C src/pdd ...`.
+- PMDD build system: `src/pmdd/makefile`.
+- Run PMDD builds from `src/pmdd`, or from the repo root with `make -C src/pmdd ...`.
 - Host compiler: `g++` with C++11 flags.
 - CUDA compiler: `nvcc` when `ENABLE_CUDA=1`; CUDA builds require detected `nvcc >= 12`.
 - Boost headers are expected under `/opt/boost/include` by default.
 - On `machine=cc`, `BOOSTDIR` is taken from `BOOST_ROOT`.
 - Gurobi include/library settings exist in the makefile but are commented out.
-- CPLEX/CP Optimizer are not linked by the PDD executable.
+- CPLEX/CP Optimizer are not linked by the PMDD executable.
 - Objective dimension is compile-time:
   - `NUM_OBJS` defines macro `NOBJS`.
   - Input files may carry an objective count, but core containers and loops assume the binary was built with the matching `NOBJS`.
 
-Common PDD commands from the repo root:
-- `make -C src/pdd NUM_OBJS=3`
-- `make -C src/pdd NUM_OBJS=3 ENABLE_CUDA=0`
-- `make -C src/pdd NUM_OBJS=3 ENABLE_OPENMP=1`
-- `make -C src/pdd clean`
-- `make -n -C src/pdd ENABLE_CUDA=0 NUM_OBJS=3`
-- `src/pdd/compile_all`
+Common PMDD commands from the repo root:
+- `make -C src/pmdd NUM_OBJS=3`
+- `make -C src/pmdd NUM_OBJS=3 ENABLE_CUDA=0`
+- `make -C src/pmdd NUM_OBJS=3 ENABLE_OPENMP=1`
+- `make -C src/pmdd clean`
+- `make -n -C src/pmdd ENABLE_CUDA=0 NUM_OBJS=3`
+- `src/pmdd/compile_all`
 
-`src/pdd/compile_all` defaults:
+`src/pmdd/compile_all` defaults:
 - Builds `NUM_OBJS=3..7`.
 - Uses `ENABLE_CUDA=1` and `ENABLE_OPENMP=1` unless overridden.
 - Runs `make clean` first unless `CLEAN_FIRST=0`.
-- Stores binaries in `resources/bin/pdd/`.
+- Stores binaries in `resources/bin/pmdd/`.
 
 Baseline commands:
 - `make -C src/baseline/dd NUM_OBJS=3`
@@ -58,7 +58,7 @@ Baseline commands:
 Usage from the repo root:
 
 ```bash
-resources/bin/pdd/multiobj_nobjs3 <input-file> <problem-type> <method> <state_dominance> [options]
+resources/bin/pmdd/multiobj_nobjs3 <input-file> <problem-type> <method> <state_dominance> [options]
 ```
 
 Problem types:
@@ -90,7 +90,7 @@ Output options:
 - `--save-stats` appends one JSONL stats record.
 - `--stats-out <path>` implies `--save-stats`; default is `<input_stem>.stats.jsonl`.
 
-GPU support in current PDD dispatch:
+GPU support in current PMDD dispatch:
 - BDD knapsack/set-packing: GPU is implemented for methods `1` and `3`.
 - BDD method `2` rejects GPU.
 - TSP/MDD: GPU is implemented for methods `1` and `3`.
@@ -104,33 +104,33 @@ Use a binary whose `NUM_OBJS` matches the input file. The examples below use
 Build an OpenMP CPU binary:
 
 ```bash
-make -C src/pdd clean
-make -C src/pdd NUM_OBJS=3 ENABLE_CUDA=0 ENABLE_OPENMP=1
+make -C src/pmdd clean
+make -C src/pmdd NUM_OBJS=3 ENABLE_CUDA=0 ENABLE_OPENMP=1
 ```
 
 Run top-down enumeration on CPU with threads (`method=1`):
 
 ```bash
-resources/bin/pdd/multiobj_nobjs3 data/3/knapsack/KP_p-3_n-10_ins-1.dat 1 1 0 --backend cpu --cpu-threads 8
+resources/bin/pmdd/multiobj_nobjs3 data/3/knapsack/KP_p-3_n-10_ins-1.dat 1 1 0 --backend cpu --cpu-threads 8
 ```
 
 Run coupled enumeration on CPU with threads (`method=3`, dynamic layer cutset):
 
 ```bash
-resources/bin/pdd/multiobj_nobjs3 data/3/knapsack/KP_p-3_n-10_ins-1.dat 1 3 0 --backend cpu --cpu-threads 8
+resources/bin/pmdd/multiobj_nobjs3 data/3/knapsack/KP_p-3_n-10_ins-1.dat 1 3 0 --backend cpu --cpu-threads 8
 ```
 
 Build a CUDA-enabled binary:
 
 ```bash
-make -C src/pdd clean
-make -C src/pdd NUM_OBJS=3 ENABLE_CUDA=1 ENABLE_OPENMP=1
+make -C src/pmdd clean
+make -C src/pmdd NUM_OBJS=3 ENABLE_CUDA=1 ENABLE_OPENMP=1
 ```
 
 Run GPU-based top-down enumeration (`method=1`):
 
 ```bash
-resources/bin/pdd/multiobj_nobjs3 data/3/knapsack/KP_p-3_n-10_ins-1.dat 1 1 0 --backend gpu
+resources/bin/pmdd/multiobj_nobjs3 data/3/knapsack/KP_p-3_n-10_ins-1.dat 1 1 0 --backend gpu
 ```
 
 For set packing, keep the same method/backend pattern and change
@@ -164,25 +164,25 @@ For TSP problem type `3`:
 - Line 2: CPU total time, `cpu_compile_s + cpu_enumeration_s`.
 - Line 3: `cpu_compile_s<TAB>cpu_enumeration_s<TAB>wall_compile_s<TAB>wall_enumeration_s`.
 
-JSONL stats are written by `src/pdd/util/output_utils.cpp` and include identity, output paths, timing, memory, work counters, dominance counters, structure, metrics, and status.
+JSONL stats are written by `src/pmdd/util/output_utils.cpp` and include identity, output paths, timing, memory, work counters, dominance counters, structure, metrics, and status.
 
 ## 5) Codebase Map
-- `src/pdd/main.cpp`
+- `src/pmdd/main.cpp`
   - CLI dispatch, instance loading, BDD/MDD construction, method/backend selection, output calls.
-- `src/pdd/util/`
+- `src/pmdd/util/`
   - `cli_parser.*`: Positional CLI and optional backend/output parsing.
   - `output_utils.*`: Three-line stdout, gzip frontier CSV, JSONL stats.
   - `stats.hpp`: `EnumerationStats` and `DDStats` structures.
   - `omp_compat.hpp`, `cpu_affinity.*`: OpenMP compatibility and CPU thread pinning.
   - `util.hpp/.cpp`: Common math and print helpers.
-- `src/pdd/bdd/`
+- `src/pmdd/bdd/`
   - `bdd.hpp`: BDD node/arc structure and maintenance methods.
   - `bdd_alg.hpp`: BDD reduction logic; `bdd_alg.cpp` is effectively empty.
   - `knapsack_bdd.*`, `indepset_bdd.*`: exact BDD constructors.
-- `src/pdd/mdd/`
+- `src/pmdd/mdd/`
   - `mdd.hpp`: MDD node/arc structure.
   - `tsp_mdd.*`: exact TSP MDD constructor.
-- `src/pdd/enum/`
+- `src/pmdd/enum/`
   - `multiobj_enum.hpp/.cpp`: Central multiobjective frontier enumeration dispatch hub (`MultiobjEnum`).
   - `pareto_frontier.hpp`: Nondominated frontier container, and frontier merge/convolution logic.
   - `cpu/`: CPU-based frontier propagation:
@@ -196,7 +196,7 @@ JSONL stats are written by `src/pdd/util/output_utils.cpp` and include identity,
     - `dominance_utils.cuh`: CUDA state dominance helper routines.
     - `enum_types.cuh`: CUDA device-side structures.
     - `cuda_wrappers.hpp`, `cuda_stubs.cpp`: Outer wrappers for CUDA launches, plus stub routines used when CUDA is disabled.
-- `src/pdd/instances/`
+- `src/pmdd/instances/`
   - Parsers for knapsack, set packing, independent set, and TSP.
   - `assignment_instance.*` is stubbed and not integrated in `main`.
 - `src/baseline/dd/`
@@ -207,19 +207,19 @@ JSONL stats are written by `src/pdd/util/output_utils.cpp` and include identity,
   - Included benchmark/input data for objective dimensions `3..7`.
 - `kb/`
   - Repository-local knowledge base.
-  - Some notes may mention older paths such as `src/enum/*` or `src/cuda/*`; when they conflict with this checkout, use current `src/pdd/*` paths.
+  - Some notes may mention older paths such as `src/enum/*` or `src/cuda/*`; when they conflict with this checkout, use current `src/pmdd/*` paths.
 
 ## 6) Input Format Cheat Sheet
-- Knapsack (`src/pdd/instances/knapsack_instance.cpp`):
+- Knapsack (`src/pmdd/instances/knapsack_instance.cpp`):
   - `n_vars n_cons num_objs`
   - `num_objs` rows of `n_vars` objective coefficients
   - For each constraint: `n_vars` coefficients followed by one RHS.
-- Set packing (`src/pdd/instances/setpacking_instance.hpp`):
+- Set packing (`src/pmdd/instances/setpacking_instance.hpp`):
   - `n_vars n_cons n_objs`
   - Objective matrix of shape `n_objs x n_vars`
   - For each constraint: `count` followed by `count` 1-based variable ids.
   - The parser converts constraint variable ids to 0-based indices.
-- TSP (`src/pdd/instances/tsp_instance.cpp`):
+- TSP (`src/pmdd/instances/tsp_instance.cpp`):
   - `n_objs n_cities`
   - For each objective: full `n_cities x n_cities` cost matrix.
 - Independent-set DIMACS parsing exists in `IndepSetInst`/`Graph`, but `main` uses it indirectly through set packing.
@@ -254,19 +254,19 @@ State dominance:
   - BDD arc weights are often allocated with `new ObjType[NOBJS]`.
   - MDD arc weights are owned by `MDDArc` and freed in `~MDDArc`.
 - If removing arcs or nodes, preserve `prev`/arc consistency and layer indices; use existing cleanup helpers where applicable.
-- Do not assume CPLEX, set-covering, portfolio, or absval code exists in the PDD executable.
+- Do not assume CPLEX, set-covering, portfolio, or absval code exists in the PMDD executable.
 
 ## 9) Agent Workflow
-- Start by reading `src/pdd/main.cpp`, `src/pdd/util/cli_parser.*`, and the file directly related to the requested change.
-- Run `make -n -C src/pdd` before full PDD builds when changing build flags or source lists.
+- Start by reading `src/pmdd/main.cpp`, `src/pmdd/util/cli_parser.*`, and the file directly related to the requested change.
+- Run `make -n -C src/pmdd` before full PMDD builds when changing build flags or source lists.
 - For CPU-only verification, use `ENABLE_CUDA=0` to avoid requiring `nvcc`.
 - For GPU changes, verify the CUDA build path and the relevant runtime branch if hardware/tooling is available.
 - For baseline changes, work inside `src/baseline/dd` or `src/baseline/dpa` and verify their separate dependencies before building.
 - For GPU TSP autoresearch or cleanup work, read the relevant `kb/` knowledge-base files before editing, but re-check all source paths against the current tree.
-- When adding a PDD problem type:
-  - Add or complete the parser in `src/pdd/instances/`.
+- When adding a PMDD problem type:
+  - Add or complete the parser in `src/pmdd/instances/`.
   - Add a BDD or MDD constructor.
   - Extend CLI validation and usage text.
-  - Extend `src/pdd/main.cpp` dispatch.
+  - Extend `src/pmdd/main.cpp` dispatch.
   - Decide whether state dominance and GPU support apply.
   - Update stdout/JSONL structure only deliberately, since scripts may depend on it.
