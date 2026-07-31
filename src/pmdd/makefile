@@ -115,10 +115,10 @@ universal: $(EXECUTABLE)
 $(EXECUTABLE): makedir $(OBJ_FILES) 
 	$(CCC) $(OBJ_FILES) $(LDFLAGS) $(PROF) -o $@
 
-$(OBJ_DIR)/%.o: %.cpp
+$(OBJ_DIR)/%.o: %.cpp | $(OBJ_DIRS)
 	$(CCC) $(CFLAGS) $< -o $@
 
-$(OBJ_DIR)/%.o: %.cu
+$(OBJ_DIR)/%.o: %.cu | $(OBJ_DIRS)
 	$(NVCC) $(CUDAFLAGS) -c $< -o $@
 
 makedir: $(OBJ_DIRS) $(BIN_DIR)
