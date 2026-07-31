@@ -123,13 +123,7 @@ __global__ void mark_globally_dominated_kernel(const ObjType *points, int num_po
                 const int gj = jb + jj;
                 if (gj == i)
                     continue;
-                bool ge = true, strict = false;
-#pragma unroll
-                for (int o = 0; o < NOBJS; ++o) {
-                    ge = ge && (sh[jj * NOBJS + o] >= pi[o]);
-                    strict = strict || (sh[jj * NOBJS + o] > pi[o]);
-                }
-                if (ge && (strict || gj < i))
+                if (dominates_or_tie_before(&sh[jj * NOBJS], pi, gj < i))
                     dom = true;
             }
         }
@@ -168,12 +162,7 @@ __global__ void mark_dominated_or_equal_by_frontier_kernel(const ObjType *candid
         if (valid && !dom) {
             const int tc = min(num_frontier - jb, (int)blockDim.x);
             for (int jj = 0; jj < tc && !dom; ++jj) {
-                bool ge = true;
-#pragma unroll
-                for (int o = 0; o < NOBJS; ++o) {
-                    ge = ge && (sh[jj * NOBJS + o] >= ci[o]);
-                }
-                if (ge)
+                if (dominates_or_tie_before(&sh[jj * NOBJS], ci, true))
                     dom = true;
             }
         }
@@ -211,13 +200,7 @@ __global__ void mark_frontier_dominated_by_batch_kernel(const ObjType *frontier,
         if (valid && !dom) {
             const int tc = min(num_cand - jb, (int)blockDim.x);
             for (int jj = 0; jj < tc && !dom; ++jj) {
-                bool ge = true, strict = false;
-#pragma unroll
-                for (int o = 0; o < NOBJS; ++o) {
-                    ge = ge && (sh[jj * NOBJS + o] >= fi[o]);
-                    strict = strict || (sh[jj * NOBJS + o] > fi[o]);
-                }
-                if (ge && strict)
+                if (dominates_or_tie_before(&sh[jj * NOBJS], fi, false))
                     dom = true;
             }
         }
