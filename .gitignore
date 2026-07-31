@@ -1,7 +1,7 @@
 AGENT.md
 INSTRUCTIONS.md
 *.jsonl
-multiobj_*
+multiobj_nobjs*
 
 reports/cp-v2
 reports/obsolete
